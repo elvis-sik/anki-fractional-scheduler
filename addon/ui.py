@@ -34,7 +34,7 @@ from aqt.qt import (
 )
 
 from .config import DEFAULT_CONFIG, normalize_config
-from .schedule import filter_deck_names_for_schedule, preview_schedule
+from .schedule import filter_deck_names_for_schedule, match_deck_names, preview_schedule
 
 
 VALID_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -53,7 +53,9 @@ TYPE_DESCRIPTIONS = {
     "dow": "Set a separate new-card limit for each weekday.",
 }
 PREVIEW_DAYS = 14
-PREVIEW_LIMIT = 12
+PREVIEW_LIMIT = 10
+SCHEDULE_LIST_WIDTH = 260
+PREVIEW_NAME_WIDTH = 36
 
 
 def _copy_schedule(sched: Dict[str, Any]) -> Dict[str, Any]:
@@ -110,12 +112,21 @@ class SchedulerConfigDialog(QDialog):
 
         # Left: schedule list + add/remove
         left = QVBoxLayout()
+        left.setSpacing(8)
         self.schedule_list = QListWidget()
+        self.schedule_list.setMinimumWidth(SCHEDULE_LIST_WIDTH)
+        self.schedule_list.setMaximumWidth(SCHEDULE_LIST_WIDTH)
+        self.schedule_list.setAlternatingRowColors(True)
         self.schedule_list.setDragDropMode(QListWidget.DragDropMode.InternalMove)
         self.schedule_list.setMinimumHeight(180)
         self.schedule_list.model().rowsMoved.connect(self._on_schedule_reordered)
         self.schedule_list.currentRowChanged.connect(self._on_schedule_selected)
-        left.addWidget(QLabel("Schedules"))
+        self.schedule_heading = QLabel("Schedules")
+        self.schedule_summary = QLabel("No schedules configured yet.")
+        self.schedule_summary.setWordWrap(True)
+        self.schedule_summary.setStyleSheet("color: palette(mid);")
+        left.addWidget(self.schedule_heading)
+        left.addWidget(self.schedule_summary)
         left.addWidget(self.schedule_list)
 
         btn_row = QHBoxLayout()
@@ -130,7 +141,7 @@ class SchedulerConfigDialog(QDialog):
         btn_row.addWidget(self.btn_remove)
         left.addLayout(btn_row)
 
-        root.addLayout(left, 1)
+        root.addLayout(left, 0)
 
         # Right: editor
         right = QVBoxLayout()
@@ -210,7 +221,11 @@ class SchedulerConfigDialog(QDialog):
         )
         self.target_help.setWordWrap(True)
         self.target_help.setStyleSheet("color: palette(mid);")
+        self.target_summary = QLabel("No targets yet.")
+        self.target_summary.setWordWrap(True)
+        self.target_summary.setStyleSheet("color: palette(mid);")
         target_layout.addWidget(self.target_help)
+        target_layout.addWidget(self.target_summary)
         target_layout.addWidget(self.target_list)
 
         target_add_row = QHBoxLayout()
@@ -306,7 +321,9 @@ class SchedulerConfigDialog(QDialog):
         right.addWidget(self.tabs, 1)
         right.addLayout(buttons)
 
-        root.addLayout(right, 2)
+        root.addLayout(right, 1)
+        root.setStretch(0, 0)
+        root.setStretch(1, 1)
 
         self._update_type_help()
         self._sync_rule_stack_height()
@@ -441,6 +458,8 @@ class SchedulerConfigDialog(QDialog):
             item.setData(Qt.ItemDataRole.UserRole, str(sched.get("_uid", "")))
             self.schedule_list.addItem(item)
 
+        self._update_schedule_summary()
+
         if self.schedule_list.count() > 0:
             self.schedule_list.setCurrentRow(0)
             self.btn_copy.setEnabled(True)
@@ -464,6 +483,7 @@ class SchedulerConfigDialog(QDialog):
         self._set_stagger_mode(self.dow_stagger_mode, "balanced")
         self.dow_stagger_seed.setText("")
         self.target_list.clear()
+        self.target_summary.setText("No targets yet.")
         self.preview.setPlainText("")
         self.preview_summary.setText("Select a schedule to preview it.")
         self._building = False
@@ -630,6 +650,7 @@ class SchedulerConfigDialog(QDialog):
         self.schedule_list.setCurrentRow(self.schedule_list.count() - 1)
         self._current_uid = sched["_uid"]
         self._set_editor_enabled(True)
+        self._update_schedule_summary()
 
     def _copy_schedule(self) -> None:
         row = self.schedule_list.currentRow()
@@ -665,6 +686,7 @@ class SchedulerConfigDialog(QDialog):
         self.schedule_list.setCurrentRow(self.schedule_list.count() - 1)
         self._current_uid = copied["_uid"]
         self._set_editor_enabled(True)
+        self._update_schedule_summary()
 
     def _remove_schedule(self) -> None:
         row = self.schedule_list.currentRow()
@@ -677,6 +699,7 @@ class SchedulerConfigDialog(QDialog):
         ]
         self._persist_config()
         self.schedule_list.takeItem(row)
+        self._update_schedule_summary()
         if self.schedule_list.count() > 0:
             self.schedule_list.setCurrentRow(min(row, self.schedule_list.count() - 1))
         else:
@@ -739,9 +762,17 @@ class SchedulerConfigDialog(QDialog):
             return
 
         deck_names = _all_deck_names()
+        raw_matches = match_deck_names(sched.get("targets", []), deck_names)
         matches = filter_deck_names_for_schedule(sched, deck_names)
+        skipped = max(0, len(raw_matches) - len(matches))
+        self._update_target_summary(
+            raw_matches,
+            matches,
+            skipped,
+            bool(sched.get("leaf_only", True)),
+        )
         if not matches:
-            self.preview_summary.setText("No matching decks.")
+            self.preview_summary.setText("No decks will receive limits with the current targets.")
             self.preview.setPlainText("")
             return
 
@@ -758,12 +789,11 @@ class SchedulerConfigDialog(QDialog):
         self.preview_summary.setText(
             f"{len(matches)} matching {summary_kind}. Showing {shown} for the next {PREVIEW_DAYS} days."
         )
-        lines: List[str] = [self._preview_header(PREVIEW_DAYS), "0 is shown as .", ""]
+        lines: List[str] = self._preview_header_lines(PREVIEW_DAYS)
+        lines.extend(["", "Today is the first column. '.' means 0.", ""])
         for name in sorted(matches)[:PREVIEW_LIMIT]:
             seq = data.get(name, [])
-            lines.append(
-                f"{name}: {self._format_preview_sequence(seq)}"
-            )
+            lines.append(self._format_preview_row(name, seq))
         if hidden:
             lines.extend(["", f"... and {hidden} more matching decks."])
         self.preview.setPlainText("\n".join(lines))
@@ -876,15 +906,33 @@ class SchedulerConfigDialog(QDialog):
         sched_type = "every_n_days" if self.type_combo.currentIndex() == 0 else "dow"
         self.type_help.setText(TYPE_DESCRIPTIONS.get(sched_type, ""))
 
-    def _preview_header(self, days: int) -> str:
-        labels = [
-            (date.today() + timedelta(days=offset)).strftime("%a")
-            for offset in range(days)
+    def _preview_header_lines(self, days: int) -> List[str]:
+        day_labels = []
+        date_labels = []
+        for offset in range(days):
+            current = date.today() + timedelta(days=offset)
+            day_labels.append(current.strftime("%a")[:2].rjust(2))
+            date_labels.append(current.strftime("%d"))
+        name_pad = " " * (PREVIEW_NAME_WIDTH + 2)
+        return [
+            f"{name_pad}{' '.join(day_labels)}",
+            f"{name_pad}{' '.join(date_labels)}",
         ]
-        return "Days: " + " ".join(labels)
 
-    def _format_preview_sequence(self, seq: List[int]) -> str:
-        return " ".join("." if int(value) == 0 else str(int(value)) for value in seq)
+    def _format_preview_row(self, name: str, seq: List[int]) -> str:
+        short_name = self._shorten_name(name, PREVIEW_NAME_WIDTH)
+        padded_name = short_name.ljust(PREVIEW_NAME_WIDTH)
+        cells = " ".join(
+            ("." if int(value) == 0 else str(int(value))).rjust(2) for value in seq
+        )
+        return f"{padded_name}  {cells}"
+
+    def _shorten_name(self, name: str, width: int) -> str:
+        if len(name) <= width:
+            return name
+        if width <= 3:
+            return name[:width]
+        return name[: width - 3] + "..."
 
     def _set_seed_controls_visible(
         self, label: QLabel, field: QLineEdit, visible: bool
@@ -912,6 +960,35 @@ class SchedulerConfigDialog(QDialog):
             if candidate == self._ensure_unique_id(candidate):
                 return candidate
             index += 1
+
+    def _update_schedule_summary(self) -> None:
+        count = self.schedule_list.count()
+        self.schedule_heading.setText(f"Schedules ({count})")
+        if count == 0:
+            self.schedule_summary.setText("No schedules configured yet.")
+        elif count == 1:
+            self.schedule_summary.setText("1 schedule configured.")
+        else:
+            self.schedule_summary.setText(f"{count} schedules configured.")
+
+    def _update_target_summary(
+        self,
+        raw_matches: List[str],
+        applied_matches: List[str],
+        skipped: int,
+        leaf_only: bool,
+    ) -> None:
+        if not raw_matches:
+            self.target_summary.setText("No matching decks for the current targets.")
+            return
+        if leaf_only and skipped:
+            self.target_summary.setText(
+                f"{len(raw_matches)} decks matched. {len(applied_matches)} leaf decks will receive limits; {skipped} parent decks are skipped."
+            )
+            return
+        self.target_summary.setText(
+            f"{len(applied_matches)} decks will receive limits with the current targets."
+        )
 
     def _ensure_unique_id(self, base_id: str, exclude_uid: Optional[str] = None) -> str:
         existing = []
