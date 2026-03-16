@@ -1,0 +1,1 @@
+{"config": {"epoch": "2026-01-01", "schedules": [{"id": "sched-2", "type": "every_n_days", "targets": ["Decks::Geography*"], "leaf_only": true, "m": 0, "n": 1, "stagger": {"mode": "hash"}}], "defaults": {"apply_on_profile_open": true, "apply_on_collection_open": true, "apply_on_sync": false, "apply_once_per_day": true, "dry_run": false, "log_level": "info"}}}
