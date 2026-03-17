@@ -100,6 +100,7 @@ class SchedulerConfigDialog(QDialog):
 
         self._current_uid: Optional[str] = None
         self._building = False
+        self._preview_width_update_in_progress = False
 
         self._build_ui()
         self._fit_to_screen()
@@ -270,6 +271,9 @@ class SchedulerConfigDialog(QDialog):
         )
         self.preview_table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.preview_table.horizontalHeader().sectionResized.connect(
+            self._on_preview_column_resized
         )
         self.preview_table.setShowGrid(True)
         self.preview_table.setGridStyle(Qt.PenStyle.SolidLine)
@@ -804,7 +808,7 @@ class SchedulerConfigDialog(QDialog):
         self.preview_summary.setText(
             f"{len(matches)} matching {summary_kind}. Scroll to see all decks and daily totals."
         )
-        self._populate_preview_table(sorted(matches), data)
+        self._populate_preview_table(self._sorted_preview_names(matches, data), data)
 
     def _load_defaults(self) -> None:
         self._building = True
@@ -923,6 +927,7 @@ class SchedulerConfigDialog(QDialog):
         self, deck_names: List[str], data: Dict[str, List[int]]
     ) -> None:
         headers = ["Deck", *self._preview_day_headers(PREVIEW_DAYS)]
+        self._preview_width_update_in_progress = True
         self.preview_table.clear()
         self.preview_table.setColumnCount(len(headers))
         self.preview_table.setHorizontalHeaderLabels(headers)
@@ -936,6 +941,7 @@ class SchedulerConfigDialog(QDialog):
                 column, QHeaderView.ResizeMode.Interactive
             )
             self.preview_table.setColumnWidth(column, 52)
+        self._apply_preview_column_widths(len(headers))
 
         totals = [0] * PREVIEW_DAYS
         for row, deck_name in enumerate(deck_names):
@@ -972,6 +978,7 @@ class SchedulerConfigDialog(QDialog):
             )
 
         self.preview_table.resizeRowsToContents()
+        self._preview_width_update_in_progress = False
 
     def _preview_day_headers(self, days: int) -> List[str]:
         headers = []
@@ -979,6 +986,54 @@ class SchedulerConfigDialog(QDialog):
             current = date.today() + timedelta(days=offset)
             headers.append(f"{current.strftime('%a')}\n{current.strftime('%d')}")
         return headers
+
+    def _sorted_preview_names(
+        self, deck_names: List[str], data: Dict[str, List[int]]
+    ) -> List[str]:
+        return sorted(
+            deck_names,
+            key=lambda name: (tuple(int(v) for v in data.get(name, [])), name.lower()),
+        )
+
+    def _apply_preview_column_widths(self, column_count: int) -> None:
+        widths = self._saved_preview_column_widths()
+        if not widths:
+            return
+        for column in range(min(column_count, len(widths))):
+            width = widths[column]
+            if width > 24:
+                self.preview_table.setColumnWidth(column, width)
+
+    def _saved_preview_column_widths(self) -> List[int]:
+        defaults = self.config.get("defaults", {})
+        widths = defaults.get("preview_column_widths")
+        if not isinstance(widths, list):
+            return []
+        saved: List[int] = []
+        for value in widths:
+            try:
+                width = int(value)
+            except Exception:
+                continue
+            if width > 0:
+                saved.append(width)
+        return saved
+
+    def _store_preview_column_widths(self) -> None:
+        widths = [
+            int(self.preview_table.columnWidth(column))
+            for column in range(self.preview_table.columnCount())
+        ]
+        defaults = dict(self.config.get("defaults", DEFAULT_CONFIG["defaults"]))
+        defaults["preview_column_widths"] = widths
+        self.config["defaults"] = defaults
+
+    def _on_preview_column_resized(
+        self, _logical_index: int, _old_size: int, _new_size: int
+    ) -> None:
+        if self._preview_width_update_in_progress or self._building:
+            return
+        self._store_preview_column_widths()
 
     def _set_preview_value_cell(self, row: int, column: int, value: int) -> None:
         if value <= 0:
