@@ -4,7 +4,7 @@ An Anki add-on to schedule fractional new cards per deck or deck groups, e.g. "1
 
 ## Status
 - Scheduler logic is implemented.
-- The add-on includes a Qt config dialog for editing schedules, previewing the next 14 days, and configuring automatic apply behavior.
+- The add-on includes a Qt config dialog for editing schedules, previewing the next 14 days in a scrollable table, and configuring automatic apply behavior.
 - Limits are applied through Anki's deck-config update path so they affect the Today-Only new-card limit UI.
 
 ## Install (manual)
@@ -19,8 +19,10 @@ An Anki add-on to schedule fractional new cards per deck or deck groups, e.g. "1
 - Multiple deck targets per schedule using exact names or wildcard prefixes.
 - Optional staggering across matched decks: balanced, hashed, or off.
 - Leaf-only matching so container decks do not receive limits.
+- Filtered decks are skipped.
 - Automatic apply on profile open, collection open, and optionally sync, with an at-most-once-per-day guard.
-- Preview for the next 14 days inside the config dialog.
+- Preview table for the next 14 days, including daily totals, persistent column widths, and grouping by identical schedules.
+- Immediate manual apply action from the Tools menu.
 
 ## Config Example
 ```json
@@ -60,8 +62,9 @@ An Anki add-on to schedule fractional new cards per deck or deck groups, e.g. "1
 - For `every_n_days`, the add-on uses a deterministic, evenly spaced pattern (Bresenham-style) and optional staggering per deck.
 - For `dow`, it applies the specified weekday limits (optionally rotated per deck if staggering is enabled).
 - Matching is by exact deck name or prefix using a trailing `*`.
+- Matching decks are grouped in the preview when they share the same visible schedule pattern.
 
 ## Notes
 - If you use a non-midnight Anki day rollover, the epoch calculation respects the rollover hour.
-- Filtered decks are skipped.
-- The preview limits itself to the first matching decks when many decks match a wildcard target.
+- The config dialog autosaves; there is no separate Save button.
+- `addon/meta.json` is local Anki state and is intentionally not tracked in git.
