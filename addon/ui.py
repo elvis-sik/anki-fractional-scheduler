@@ -7,12 +7,13 @@ from typing import Any, Dict, List, Optional
 from aqt import mw
 from aqt.qt import (
     QAction,
-    QAbstractScrollArea,
+    QBrush,
     QCheckBox,
+    QColor,
     QComboBox,
     QDialog,
     QFormLayout,
-    QFontDatabase,
+    QHeaderView,
     QGuiApplication,
     QGroupBox,
     QGridLayout,
@@ -27,7 +28,8 @@ from aqt.qt import (
     QSpinBox,
     QStackedWidget,
     QTabWidget,
-    QTextEdit,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     Qt,
     QWidget,
@@ -53,9 +55,7 @@ TYPE_DESCRIPTIONS = {
     "dow": "Set a separate new-card limit for each weekday.",
 }
 PREVIEW_DAYS = 14
-PREVIEW_LIMIT = 10
 SCHEDULE_LIST_WIDTH = 260
-PREVIEW_NAME_WIDTH = 36
 
 
 def _copy_schedule(sched: Dict[str, Any]) -> Dict[str, Any]:
@@ -251,21 +251,32 @@ class SchedulerConfigDialog(QDialog):
         self.preview_summary = QLabel("Select a schedule to preview it.")
         self.preview_summary.setWordWrap(True)
         self.preview_summary.setStyleSheet("color: palette(mid);")
-        self.preview = QTextEdit()
-        self.preview.setReadOnly(True)
-        self.preview.setSizeAdjustPolicy(
-            QAbstractScrollArea.SizeAdjustPolicy.AdjustIgnored
+        self.preview_table = QTableWidget()
+        self.preview_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.preview_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        self.preview_table.setAlternatingRowColors(True)
+        self.preview_table.setWordWrap(False)
+        self.preview_table.verticalHeader().setVisible(False)
+        self.preview_table.verticalHeader().setDefaultSectionSize(26)
+        self.preview_table.horizontalHeader().setStretchLastSection(False)
+        self.preview_table.horizontalHeader().setDefaultAlignment(
+            Qt.AlignmentFlag.AlignCenter
         )
-        self.preview.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
-        self.preview.setFont(
-            QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+        self.preview_table.horizontalHeader().setMinimumSectionSize(44)
+        self.preview_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
         )
-        self.preview.setMinimumHeight(120)
-        self.preview.setSizePolicy(
+        self.preview_table.setShowGrid(True)
+        self.preview_table.setStyleSheet(
+            "QTableWidget { gridline-color: palette(midlight); }"
+            "QHeaderView::section { background: #eef4ff; padding: 6px 4px; font-weight: 600; border: 1px solid palette(midlight); }"
+        )
+        self.preview_table.setMinimumHeight(180)
+        self.preview_table.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
         preview_layout.addWidget(self.preview_summary)
-        preview_layout.addWidget(self.preview, 1)
+        preview_layout.addWidget(self.preview_table, 1)
         schedule_tab_layout.addWidget(preview_box, 1)
         preview_box.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         schedule_tab_layout.addStretch(1)
@@ -484,7 +495,7 @@ class SchedulerConfigDialog(QDialog):
         self.dow_stagger_seed.setText("")
         self.target_list.clear()
         self.target_summary.setText("No targets yet.")
-        self.preview.setPlainText("")
+        self._clear_preview_table()
         self.preview_summary.setText("Select a schedule to preview it.")
         self._building = False
 
@@ -773,7 +784,7 @@ class SchedulerConfigDialog(QDialog):
         )
         if not matches:
             self.preview_summary.setText("No decks will receive limits with the current targets.")
-            self.preview.setPlainText("")
+            self._clear_preview_table()
             return
 
         data = preview_schedule(
@@ -784,19 +795,10 @@ class SchedulerConfigDialog(QDialog):
             days=PREVIEW_DAYS,
         )
         summary_kind = "leaf decks" if sched.get("leaf_only", True) else "decks"
-        shown = min(len(matches), PREVIEW_LIMIT)
-        hidden = max(0, len(matches) - shown)
         self.preview_summary.setText(
-            f"{len(matches)} matching {summary_kind}. Showing {shown} for the next {PREVIEW_DAYS} days."
+            f"{len(matches)} matching {summary_kind}. Scroll to see all decks and daily totals."
         )
-        lines: List[str] = self._preview_header_lines(PREVIEW_DAYS)
-        lines.extend(["", "Today is the first column. '.' means 0.", ""])
-        for name in sorted(matches)[:PREVIEW_LIMIT]:
-            seq = data.get(name, [])
-            lines.append(self._format_preview_row(name, seq))
-        if hidden:
-            lines.extend(["", f"... and {hidden} more matching decks."])
-        self.preview.setPlainText("\n".join(lines))
+        self._populate_preview_table(sorted(matches), data)
 
     def _load_defaults(self) -> None:
         self._building = True
@@ -906,33 +908,117 @@ class SchedulerConfigDialog(QDialog):
         sched_type = "every_n_days" if self.type_combo.currentIndex() == 0 else "dow"
         self.type_help.setText(TYPE_DESCRIPTIONS.get(sched_type, ""))
 
-    def _preview_header_lines(self, days: int) -> List[str]:
-        day_labels = []
-        date_labels = []
+    def _clear_preview_table(self) -> None:
+        self.preview_table.clear()
+        self.preview_table.setRowCount(0)
+        self.preview_table.setColumnCount(0)
+
+    def _populate_preview_table(
+        self, deck_names: List[str], data: Dict[str, List[int]]
+    ) -> None:
+        headers = ["Deck", *self._preview_day_headers(PREVIEW_DAYS)]
+        self.preview_table.clear()
+        self.preview_table.setColumnCount(len(headers))
+        self.preview_table.setHorizontalHeaderLabels(headers)
+        self.preview_table.setRowCount(len(deck_names) + 1)
+        self.preview_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
+        for column in range(1, len(headers)):
+            self.preview_table.horizontalHeader().setSectionResizeMode(
+                column, QHeaderView.ResizeMode.ResizeToContents
+            )
+
+        totals = [0] * PREVIEW_DAYS
+        for row, deck_name in enumerate(deck_names):
+            self._set_preview_item(
+                row,
+                0,
+                deck_name,
+                align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                tooltip=deck_name,
+            )
+            seq = data.get(deck_name, [])
+            for day, value in enumerate(seq):
+                totals[day] += int(value)
+                self._set_preview_value_cell(row, day + 1, int(value))
+
+        total_row = len(deck_names)
+        self._set_preview_item(
+            total_row,
+            0,
+            "Daily total",
+            align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            bold=True,
+            background=QColor("#e8f1ff"),
+        )
+        for day, total in enumerate(totals):
+            self._set_preview_item(
+                total_row,
+                day + 1,
+                str(total),
+                align=Qt.AlignmentFlag.AlignCenter,
+                bold=True,
+                background=QColor("#e8f1ff"),
+                foreground=QColor("#0b5394"),
+            )
+
+        self.preview_table.resizeRowsToContents()
+
+    def _preview_day_headers(self, days: int) -> List[str]:
+        headers = []
         for offset in range(days):
             current = date.today() + timedelta(days=offset)
-            day_labels.append(current.strftime("%a")[:2].rjust(2))
-            date_labels.append(current.strftime("%d"))
-        name_pad = " " * (PREVIEW_NAME_WIDTH + 2)
-        return [
-            f"{name_pad}{' '.join(day_labels)}",
-            f"{name_pad}{' '.join(date_labels)}",
-        ]
+            headers.append(f"{current.strftime('%a')}\n{current.strftime('%d')}")
+        return headers
 
-    def _format_preview_row(self, name: str, seq: List[int]) -> str:
-        short_name = self._shorten_name(name, PREVIEW_NAME_WIDTH)
-        padded_name = short_name.ljust(PREVIEW_NAME_WIDTH)
-        cells = " ".join(
-            ("." if int(value) == 0 else str(int(value))).rjust(2) for value in seq
+    def _set_preview_value_cell(self, row: int, column: int, value: int) -> None:
+        if value <= 0:
+            self._set_preview_item(
+                row,
+                column,
+                "0",
+                align=Qt.AlignmentFlag.AlignCenter,
+                background=QColor("#f5f7fa"),
+                foreground=QColor("#97a1af"),
+            )
+            return
+        self._set_preview_item(
+            row,
+            column,
+            str(value),
+            align=Qt.AlignmentFlag.AlignCenter,
+            bold=True,
+            background=QColor("#dff2e4"),
+            foreground=QColor("#1f6b36"),
         )
-        return f"{padded_name}  {cells}"
 
-    def _shorten_name(self, name: str, width: int) -> str:
-        if len(name) <= width:
-            return name
-        if width <= 3:
-            return name[:width]
-        return name[: width - 3] + "..."
+    def _set_preview_item(
+        self,
+        row: int,
+        column: int,
+        text: str,
+        *,
+        align: Qt.AlignmentFlag,
+        bold: bool = False,
+        background: Optional[QColor] = None,
+        foreground: Optional[QColor] = None,
+        tooltip: Optional[str] = None,
+    ) -> None:
+        item = QTableWidgetItem(text)
+        item.setTextAlignment(int(align))
+        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable & ~Qt.ItemFlag.ItemIsSelectable)
+        if tooltip:
+            item.setToolTip(tooltip)
+        if background is not None:
+            item.setBackground(QBrush(background))
+        if foreground is not None:
+            item.setForeground(QBrush(foreground))
+        if bold:
+            font = item.font()
+            font.setBold(True)
+            item.setFont(font)
+        self.preview_table.setItem(row, column, item)
 
     def _set_seed_controls_visible(
         self, label: QLabel, field: QLineEdit, visible: bool
