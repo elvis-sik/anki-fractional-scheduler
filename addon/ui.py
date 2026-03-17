@@ -263,13 +263,19 @@ class SchedulerConfigDialog(QDialog):
             Qt.AlignmentFlag.AlignCenter
         )
         self.preview_table.horizontalHeader().setMinimumSectionSize(44)
+        self.preview_table.horizontalHeader().setSectionsClickable(False)
+        self.preview_table.horizontalHeader().setHighlightSections(False)
+        self.preview_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Interactive
+        )
         self.preview_table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeMode.ResizeToContents
         )
         self.preview_table.setShowGrid(True)
+        self.preview_table.setGridStyle(Qt.PenStyle.SolidLine)
         self.preview_table.setStyleSheet(
-            "QTableWidget { gridline-color: palette(midlight); }"
-            "QHeaderView::section { background: #eef4ff; padding: 6px 4px; font-weight: 600; border: 1px solid palette(midlight); }"
+            "QTableWidget { gridline-color: #b8c4d3; alternate-background-color: #fafcff; }"
+            "QHeaderView::section { background: #eef4ff; padding: 6px 4px; font-weight: 600; border-top: 1px solid #b8c4d3; border-left: 1px solid #b8c4d3; border-right: 1px solid #8fa1b8; border-bottom: 1px solid #8fa1b8; }"
         )
         self.preview_table.setMinimumHeight(180)
         self.preview_table.setSizePolicy(
@@ -921,13 +927,15 @@ class SchedulerConfigDialog(QDialog):
         self.preview_table.setColumnCount(len(headers))
         self.preview_table.setHorizontalHeaderLabels(headers)
         self.preview_table.setRowCount(len(deck_names) + 1)
+        self.preview_table.setColumnWidth(0, 280)
         self.preview_table.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.ResizeToContents
+            0, QHeaderView.ResizeMode.Interactive
         )
         for column in range(1, len(headers)):
             self.preview_table.horizontalHeader().setSectionResizeMode(
-                column, QHeaderView.ResizeMode.ResizeToContents
+                column, QHeaderView.ResizeMode.Interactive
             )
+            self.preview_table.setColumnWidth(column, 52)
 
         totals = [0] * PREVIEW_DAYS
         for row, deck_name in enumerate(deck_names):
