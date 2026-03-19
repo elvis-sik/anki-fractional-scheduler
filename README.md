@@ -23,6 +23,26 @@ An Anki add-on to schedule fractional new cards per deck or deck groups, e.g. "1
 - Automatic apply on profile open, collection open, and optionally sync, with an at-most-once-per-day guard.
 - Preview table for the next 14 days, including daily totals, persistent column widths, and grouping by identical schedules.
 - Immediate manual apply action from the Tools menu.
+- Read-only API for other add-ons via `mw.fractional_scheduler_api`.
+
+## Public API
+
+The add-on registers a read-only service on `mw`:
+
+```python
+snapshot = mw.fractional_scheduler_api.get_schedule_health_snapshot(col)
+```
+
+It returns a dict keyed by deck id. Each value reports:
+
+- `deck_id`
+- `deck_name`
+- `schedule_id`
+- `cycle_length_days`
+- `has_future_positive_limit`
+- `next_positive_day_offset`
+
+The service only includes matched, non-dynamic decks that survive `leaf_only` filtering. A deck is considered to have a future positive limit if, within one full schedule cycle, at least one day yields `> 0` new cards.
 
 ## Config Example
 ```json

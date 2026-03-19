@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .api import FractionalSchedulerAPI
 from .apply import apply_limits
 from .config import load_config
 from .schedule import compute_deck_limits
@@ -23,6 +24,15 @@ def _log(message: str) -> None:
     if mw is None:
         return
     print(f"[FractionalScheduler] {message}")
+
+
+def _register_api_service() -> None:
+    if mw is None:
+        return
+    try:
+        mw.fractional_scheduler_api = FractionalSchedulerAPI(__name__)
+    except Exception:
+        pass
 
 
 def _today_key(col) -> int | None:
@@ -81,6 +91,7 @@ def _apply(col, source: str) -> tuple[int, int, bool]:
 def _on_profile_open() -> None:
     if mw is None or mw.col is None:
         return
+    _register_api_service()
     config = load_config(__name__)
     if not config.defaults.get("apply_on_profile_open", True):
         return
@@ -135,6 +146,8 @@ def _setup_menu() -> None:
     if mw is None or QAction is None:
         return
 
+    _register_api_service()
+
     action_apply = QAction("Apply Fractional Schedule Now", mw)
     action_apply.triggered.connect(_apply_now)
     mw.form.menuTools.addAction(action_apply)
@@ -148,6 +161,9 @@ def _setup_menu() -> None:
     except Exception:
         pass
 
+
+if mw is not None:
+    _register_api_service()
 
 if gui_hooks is not None:
     gui_hooks.profile_did_open.append(_on_profile_open)

@@ -25,6 +25,16 @@ class DeckLimit:
     limit: int
 
 
+@dataclass(frozen=True)
+class FractionalDeckHealth:
+    deck_id: int
+    deck_name: str
+    schedule_id: Optional[str]
+    cycle_length_days: int
+    has_future_positive_limit: bool
+    next_positive_day_offset: Optional[int]
+
+
 def _local_tzinfo():
     return datetime.now().astimezone().tzinfo
 
@@ -219,34 +229,8 @@ def _assign_phases(schedule: Dict[str, Any], deck_names: List[str]) -> Dict[str,
 
 def compute_deck_limits(col, config) -> List[DeckLimit]:
     decks = _collect_decks(col)
-    assignments: Dict[int, Dict[str, Any]] = {}
-
-    for deck in decks:
-        if deck.is_dynamic:
-            continue
-        sched = _best_schedule_for_deck(deck.name, config.schedules)
-        if sched is None:
-            continue
-        if sched.get("leaf_only", True) and deck.has_children:
-            continue
-        assignments[deck.deck_id] = sched
-
-    # group by schedule id
-    schedule_to_deck_names: Dict[str, List[str]] = {}
-    for deck in decks:
-        sched = assignments.get(deck.deck_id)
-        if not sched:
-            continue
-        schedule_to_deck_names.setdefault(sched["id"], []).append(deck.name)
-
-    anki_today_num = anki_today(col)
-    rollover_hours = _rollover_hours(col)
-    epoch_day = anki_day_number_from_date_str(config.epoch, rollover_hours)
-    day_index = anki_today_num - epoch_day
-
-    # compute weekday index based on anki day start
-    day_start_ts = (anki_today_num * 86400) + (rollover_hours * 3600)
-    weekday_idx = datetime.fromtimestamp(day_start_ts, tz=_local_tzinfo()).weekday()  # Mon=0
+    assignments, schedule_to_deck_names = _schedule_assignments(decks, config.schedules)
+    calendar_state = _calendar_state(col, config.epoch)
 
     results: List[DeckLimit] = []
 
@@ -256,23 +240,120 @@ def compute_deck_limits(col, config) -> List[DeckLimit]:
             continue
 
         deck_names = schedule_to_deck_names.get(sched["id"], [])
-        phases = _assign_phases(sched, deck_names)
-        phase = phases.get(deck.name, 0)
-
-        if sched["type"] == "every_n_days":
-            n = int(sched["n"])
-            m = int(sched["m"])
-            pattern = bresenham_pattern(m, n)
-            idx = (day_index + phase) % n
-            limit = int(pattern[idx])
-        else:
-            idx = (weekday_idx + phase) % 7
-            day_key = VALID_DAYS[idx]
-            limit = int(sched["by_day"].get(day_key, 0))
+        limit = _limit_for_offset(
+            sched,
+            deck.name,
+            deck_names,
+            calendar_state["day_index"],
+            calendar_state["weekday_idx"],
+            0,
+        )
 
         results.append(DeckLimit(deck_id=deck.deck_id, name=deck.name, limit=limit))
 
     return results
+
+
+def compute_schedule_health_snapshot(col, config) -> Dict[int, FractionalDeckHealth]:
+    decks = _collect_decks(col)
+    assignments, schedule_to_deck_names = _schedule_assignments(decks, config.schedules)
+    calendar_state = _calendar_state(col, config.epoch)
+
+    snapshot: Dict[int, FractionalDeckHealth] = {}
+
+    for deck in decks:
+        sched = assignments.get(deck.deck_id)
+        if not sched:
+            continue
+
+        cycle_length = _schedule_cycle_length(sched)
+        deck_names = schedule_to_deck_names.get(str(sched["id"]), [])
+        next_positive_offset: Optional[int] = None
+
+        for offset in range(cycle_length):
+            limit = _limit_for_offset(
+                sched,
+                deck.name,
+                deck_names,
+                calendar_state["day_index"],
+                calendar_state["weekday_idx"],
+                offset,
+            )
+            if limit > 0:
+                next_positive_offset = offset
+                break
+
+        snapshot[deck.deck_id] = FractionalDeckHealth(
+            deck_id=deck.deck_id,
+            deck_name=deck.name,
+            schedule_id=str(sched["id"]),
+            cycle_length_days=cycle_length,
+            has_future_positive_limit=next_positive_offset is not None,
+            next_positive_day_offset=next_positive_offset,
+        )
+
+    return snapshot
+
+
+def _schedule_assignments(
+    decks: List[DeckInfo], schedules: List[Dict[str, Any]]
+) -> Tuple[Dict[int, Dict[str, Any]], Dict[str, List[str]]]:
+    assignments: Dict[int, Dict[str, Any]] = {}
+
+    for deck in decks:
+        if deck.is_dynamic:
+            continue
+        sched = _best_schedule_for_deck(deck.name, schedules)
+        if sched is None:
+            continue
+        if sched.get("leaf_only", True) and deck.has_children:
+            continue
+        assignments[deck.deck_id] = sched
+
+    schedule_to_deck_names: Dict[str, List[str]] = {}
+    for deck in decks:
+        sched = assignments.get(deck.deck_id)
+        if not sched:
+            continue
+        schedule_to_deck_names.setdefault(str(sched["id"]), []).append(deck.name)
+
+    return assignments, schedule_to_deck_names
+
+
+def _calendar_state(col, epoch: str) -> Dict[str, int]:
+    anki_today_num = anki_today(col)
+    rollover_hours = _rollover_hours(col)
+    epoch_day = anki_day_number_from_date_str(epoch, rollover_hours)
+    day_index = anki_today_num - epoch_day
+    day_start_ts = (anki_today_num * 86400) + (rollover_hours * 3600)
+    weekday_idx = datetime.fromtimestamp(day_start_ts, tz=_local_tzinfo()).weekday()
+    return {
+        "day_index": day_index,
+        "weekday_idx": weekday_idx,
+    }
+
+
+def _limit_for_offset(
+    schedule: Dict[str, Any],
+    deck_name: str,
+    deck_names: List[str],
+    day_index: int,
+    weekday_idx: int,
+    offset: int,
+) -> int:
+    phases = _assign_phases(schedule, deck_names)
+    phase = phases.get(deck_name, 0)
+
+    if schedule["type"] == "every_n_days":
+        n = int(schedule["n"])
+        m = int(schedule["m"])
+        pattern = bresenham_pattern(m, n)
+        idx = (day_index + phase + offset) % n
+        return int(pattern[idx])
+
+    idx = (weekday_idx + phase + offset) % 7
+    day_key = VALID_DAYS[idx]
+    return int((schedule.get("by_day") or {}).get(day_key, 0))
 
 
 def _deck_name_and_id(entry: Any) -> Tuple[Optional[str], Optional[int]]:
