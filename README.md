@@ -80,6 +80,7 @@ The service only includes matched, non-dynamic decks that survive `leaf_only` fi
 
 ## How It Works
 - For `every_n_days`, the add-on uses a deterministic, evenly spaced pattern (Bresenham-style) and optional staggering per deck.
+- For `every_n_days`, a day with `0` newly introduced cards does not consume that deck's slot; the cycle resumes when you actually introduce the next new card.
 - For `dow`, it applies the specified weekday limits (optionally rotated per deck if staggering is enabled).
 - Matching is by exact deck name or prefix using a trailing `*`.
 - Matching decks are grouped in the preview when they share the same visible schedule pattern.
