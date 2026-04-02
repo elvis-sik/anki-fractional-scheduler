@@ -8,5 +8,9 @@
     "apply_once_per_day": true,
     "dry_run": false,
     "log_level": "info"
+  },
+  "migration": {
+    "notify_empty_decks_imported": false,
+    "notify_empty_decks_status": "pending"
   }
 }

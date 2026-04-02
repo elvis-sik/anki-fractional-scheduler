@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -12,6 +14,13 @@ except Exception:  # pragma: no cover - when imported outside Anki
 
 VALID_TYPES = {"every_n_days", "dow"}
 VALID_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+DEFAULT_NOTIFY_DESCENDANT_MODE = "direct_only"
+VALID_NOTIFY_DESCENDANT_MODES = {
+    DEFAULT_NOTIFY_DESCENDANT_MODE,
+    "any_blocked_descendant",
+    "all_included_descendants_blocked",
+    "hide_container_rows",
+}
 
 
 @dataclass(frozen=True)
@@ -19,6 +28,7 @@ class AddonConfig:
     epoch: str
     schedules: List[Dict[str, Any]]
     defaults: Dict[str, Any]
+    migration: Dict[str, Any]
 
 
 DEFAULT_CONFIG = {
@@ -31,6 +41,10 @@ DEFAULT_CONFIG = {
         "apply_once_per_day": True,
         "dry_run": False,
         "log_level": "info",
+    },
+    "migration": {
+        "notify_empty_decks_imported": False,
+        "notify_empty_decks_status": "pending",
     },
 }
 
@@ -54,8 +68,11 @@ def _get_config(addon_name: str) -> Dict[str, Any]:
 
 
 def load_config(addon_name: str) -> AddonConfig:
-    raw = _get_config(addon_name)
-    return normalize_config(raw)
+    raw, imported = _maybe_import_legacy_notify_config(_get_config(addon_name))
+    normalized = normalize_config(raw)
+    if imported and mw is not None:
+        mw.addonManager.writeConfig(addon_name, config_to_dict(normalized))
+    return normalized
 
 
 def save_config(addon_name: str, config: AddonConfig | Dict[str, Any]) -> None:
@@ -70,6 +87,7 @@ def config_to_dict(config: AddonConfig | Dict[str, Any]) -> Dict[str, Any]:
             "epoch": config.epoch,
             "schedules": config.schedules,
             "defaults": config.defaults,
+            "migration": config.migration,
         }
     else:
         source = config
@@ -79,6 +97,7 @@ def config_to_dict(config: AddonConfig | Dict[str, Any]) -> Dict[str, Any]:
         "epoch": normalized.epoch,
         "schedules": [_schedule_to_dict(sched) for sched in normalized.schedules],
         "defaults": dict(normalized.defaults),
+        "migration": dict(normalized.migration),
     }
 
 
@@ -87,6 +106,8 @@ def normalize_config(raw: Dict[str, Any]) -> AddonConfig:
 
     defaults = DEFAULT_CONFIG["defaults"].copy()
     defaults.update(raw.get("defaults") or {})
+    migration = DEFAULT_CONFIG["migration"].copy()
+    migration.update(raw.get("migration") or {})
 
     schedules_in = raw.get("schedules") or []
     schedules: List[Dict[str, Any]] = []
@@ -112,6 +133,11 @@ def normalize_config(raw: Dict[str, Any]) -> AddonConfig:
             "type": sched_type,
             "targets": targets,
             "leaf_only": bool(sched.get("leaf_only", True)),
+            "fractional_enabled": bool(sched.get("fractional_enabled", True)),
+            "notify_enabled": bool(sched.get("notify_enabled", False)),
+            "notify_descendant_mode": _normalize_notify_descendant_mode(
+                sched.get("notify_descendant_mode")
+            ),
         }
 
         if sched_type == "every_n_days":
@@ -145,7 +171,83 @@ def normalize_config(raw: Dict[str, Any]) -> AddonConfig:
 
         schedules.append(normalized)
 
-    return AddonConfig(epoch=epoch, schedules=schedules, defaults=defaults)
+    return AddonConfig(
+        epoch=epoch,
+        schedules=schedules,
+        defaults=defaults,
+        migration=migration,
+    )
+
+
+def _normalize_notify_descendant_mode(value: Any) -> str:
+    mode = str(value or DEFAULT_NOTIFY_DESCENDANT_MODE)
+    if mode == "aggregate_children":
+        mode = "any_blocked_descendant"
+    if mode not in VALID_NOTIFY_DESCENDANT_MODES:
+        return DEFAULT_NOTIFY_DESCENDANT_MODE
+    return mode
+
+
+def _maybe_import_legacy_notify_config(raw: Dict[str, Any]) -> tuple[Dict[str, Any], bool]:
+    migration = dict(DEFAULT_CONFIG["migration"])
+    migration.update(raw.get("migration") or {})
+    if migration.get("notify_empty_decks_imported"):
+        return raw, False
+
+    schedules = raw.get("schedules") or []
+    if any(isinstance(schedule, dict) and schedule.get("notify_enabled") for schedule in schedules):
+        return raw, False
+
+    legacy_path = Path(__file__).resolve().parents[2] / "notify-empty-decks" / "config.json"
+    if not legacy_path.exists():
+        return raw, False
+
+    try:
+        legacy = json.loads(legacy_path.read_text(encoding="utf-8"))
+    except Exception:
+        return raw, False
+
+    if not isinstance(legacy, dict):
+        return raw, False
+
+    include_patterns = legacy.get("include_patterns") or []
+    exclude_patterns = legacy.get("exclude_patterns") or []
+    use_regex = bool(legacy.get("use_regex_patterns", False))
+    if use_regex or exclude_patterns:
+        return raw, False
+    if not isinstance(include_patterns, list):
+        return raw, False
+
+    imported_schedules = list(schedules)
+    notify_mode = _normalize_notify_descendant_mode(legacy.get("container_deck_mode"))
+    for pattern in include_patterns:
+        if not isinstance(pattern, str) or not pattern.strip():
+            continue
+        imported_schedules.append(
+            {
+                "_uid": str(uuid.uuid4()),
+                "id": f"Notify {pattern.strip()}",
+                "type": "every_n_days",
+                "m": 1,
+                "n": 1,
+                "targets": [pattern.strip()],
+                "leaf_only": True,
+                "fractional_enabled": False,
+                "notify_enabled": True,
+                "notify_descendant_mode": notify_mode,
+            }
+        )
+
+    if len(imported_schedules) == len(schedules):
+        return raw, False
+
+    imported = dict(raw)
+    imported["schedules"] = imported_schedules
+    imported_migration = dict(migration)
+    imported_migration["notify_empty_decks_imported"] = True
+    imported_migration["notify_empty_decks_status"] = "imported"
+    imported["migration"] = imported_migration
+    return imported, True
 
 
 def _normalize_stagger_state(raw_state: Any) -> Optional[Dict[str, Any]]:
@@ -186,6 +288,11 @@ def _schedule_to_dict(sched: Dict[str, Any]) -> Dict[str, Any]:
         "type": str(sched.get("type", "every_n_days")),
         "targets": list(sched.get("targets", []) or []),
         "leaf_only": bool(sched.get("leaf_only", True)),
+        "fractional_enabled": bool(sched.get("fractional_enabled", True)),
+        "notify_enabled": bool(sched.get("notify_enabled", False)),
+        "notify_descendant_mode": _normalize_notify_descendant_mode(
+            sched.get("notify_descendant_mode")
+        ),
     }
 
     if persisted["type"] == "every_n_days":

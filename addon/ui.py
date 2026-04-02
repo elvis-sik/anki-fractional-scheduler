@@ -34,10 +34,13 @@ from aqt.qt import (
     QWidget,
 )
 
-from .config import DEFAULT_CONFIG, config_to_dict, normalize_config
+from .config import DEFAULT_CONFIG, config_to_dict, load_config, normalize_config
+from .notify import refresh_deck_browser
 from .schedule import (
+    FEATURE_NOTIFY,
     filter_deck_names_for_schedule,
     match_deck_names,
+    match_deck_names_for_feature,
     preview_schedule,
     rebalance_schedule_offsets,
 )
@@ -56,6 +59,18 @@ TYPE_DESCRIPTIONS = {
     "every_n_days": "Introduce new cards on a repeating cycle, such as 1 card every 3 days.",
     "dow": "Set a separate new-card limit for each weekday.",
 }
+NOTIFY_MODE_OPTIONS = [
+    ("This row only", "direct_only"),
+    ("Any blocked descendant", "any_blocked_descendant"),
+    ("All included descendants blocked", "all_included_descendants_blocked"),
+    ("Hide container badge", "hide_container_rows"),
+]
+NOTIFY_MODE_DESCRIPTIONS = {
+    "direct_only": "Only this exact deck row checks its own direct cards. Descendants do not affect it.",
+    "any_blocked_descendant": "This row also warns when any included descendant deck is blocked.",
+    "all_included_descendants_blocked": "This row only warns for descendants when every included descendant deck is blocked.",
+    "hide_container_rows": "Descendants still count for health, but pure container rows stay quiet.",
+}
 PREVIEW_DAYS = 14
 SCHEDULE_LIST_WIDTH = 260
 
@@ -67,6 +82,11 @@ def _copy_schedule(sched: Dict[str, Any]) -> Dict[str, Any]:
         "type": str(sched.get("type", "every_n_days")),
         "targets": list(sched.get("targets", []) or []),
         "leaf_only": bool(sched.get("leaf_only", True)),
+        "fractional_enabled": bool(sched.get("fractional_enabled", True)),
+        "notify_enabled": bool(sched.get("notify_enabled", False)),
+        "notify_descendant_mode": str(
+            sched.get("notify_descendant_mode", "direct_only")
+        ),
     }
     if copied["type"] == "every_n_days":
         copied["m"] = int(sched.get("m", 1))
@@ -94,6 +114,7 @@ def _normalized_config_dict(raw: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         "epoch": normalized.epoch,
         "schedules": [_copy_schedule(sched) for sched in normalized.schedules],
         "defaults": dict(normalized.defaults),
+        "migration": dict(normalized.migration),
     }
 
 
@@ -104,8 +125,8 @@ class SchedulerConfigDialog(QDialog):
         self.setWindowTitle("Fractional Scheduler Config")
         self.resize(920, 560)
 
-        raw_config = mw.addonManager.getConfig(module) if mw is not None else None
-        self.config: Dict[str, Any] = _normalized_config_dict(raw_config)
+        loaded = load_config(module) if mw is not None else normalize_config(DEFAULT_CONFIG)
+        self.config: Dict[str, Any] = _normalized_config_dict(config_to_dict(loaded))
 
         self._current_uid: Optional[str] = None
         self._building = False
@@ -203,6 +224,15 @@ class SchedulerConfigDialog(QDialog):
             "Skip container decks that only exist to hold subdecks."
         )
         self.leaf_only_check.stateChanged.connect(self._refresh_preview)
+        self.fractional_enabled_check = QCheckBox("Enable fractional new/day limits")
+        self.fractional_enabled_check.setChecked(True)
+        self.fractional_enabled_check.stateChanged.connect(self._refresh_preview)
+        self.notify_enabled_check = QCheckBox("Enable empty-deck notify badges")
+        self.notify_enabled_check.stateChanged.connect(self._refresh_preview)
+        self.notify_mode_combo = QComboBox()
+        for label, value in NOTIFY_MODE_OPTIONS:
+            self.notify_mode_combo.addItem(label, value)
+        self.notify_mode_combo.currentIndexChanged.connect(self._refresh_preview)
 
         name_label = QLabel("Name")
         name_label.setToolTip("Shown in the schedule list.")
@@ -219,12 +249,25 @@ class SchedulerConfigDialog(QDialog):
         )
         self.leaf_only_help.setWordWrap(True)
         self.leaf_only_help.setStyleSheet("color: palette(mid);")
+        self.feature_help = QLabel(
+            "A schedule can drive fractional limits, notify badges, both, or neither for testing."
+        )
+        self.feature_help.setWordWrap(True)
+        self.feature_help.setStyleSheet("color: palette(mid);")
+        self.notify_mode_help = QLabel()
+        self.notify_mode_help.setWordWrap(True)
+        self.notify_mode_help.setStyleSheet("color: palette(mid);")
 
         schedule_form.addRow(name_label, self.id_edit)
         schedule_form.addRow(type_label, self.type_combo)
         schedule_form.addRow("", self.type_help)
+        schedule_form.addRow("", self.fractional_enabled_check)
         schedule_form.addRow("", self.leaf_only_check)
+        schedule_form.addRow("", self.notify_enabled_check)
+        schedule_form.addRow("Notify descendants", self.notify_mode_combo)
+        schedule_form.addRow("", self.feature_help)
         schedule_form.addRow("", self.leaf_only_help)
+        schedule_form.addRow("", self.notify_mode_help)
         schedule_tab_layout.addWidget(schedule_box)
 
         self.rule_box = QGroupBox("Rule")
@@ -242,7 +285,7 @@ class SchedulerConfigDialog(QDialog):
         self.target_list.setMinimumHeight(80)
         self.target_list.setMaximumHeight(110)
         self.target_help = QLabel(
-            "Pick deck adds an exact target immediately. Use Add wildcard... or type patterns like Deck::Subdeck*."
+            "Pick deck adds an exact target immediately. Targets also support shell-style wildcards like Deck::Subdeck*, *Chemistry*, or Deck??."
         )
         self.target_help.setWordWrap(True)
         self.target_help.setStyleSheet("color: palette(mid);")
@@ -543,6 +586,9 @@ class SchedulerConfigDialog(QDialog):
 
         self.id_edit.setText(str(sched.get("id", "")))
         self.leaf_only_check.setChecked(bool(sched.get("leaf_only", True)))
+        self.fractional_enabled_check.setChecked(bool(sched.get("fractional_enabled", True)))
+        self.notify_enabled_check.setChecked(bool(sched.get("notify_enabled", False)))
+        self._set_notify_mode(str(sched.get("notify_descendant_mode", "direct_only")))
 
         sched_type = sched.get("type", "every_n_days")
         self.type_combo.setCurrentIndex(0 if sched_type == "every_n_days" else 1)
@@ -562,6 +608,7 @@ class SchedulerConfigDialog(QDialog):
             self.target_list.addItem(QListWidgetItem(str(t)))
 
         self._building = False
+        self._refresh_feature_controls()
         self._refresh_preview()
 
     def _load_stagger(self, sched: Dict[str, Any], mode_combo: QComboBox, help_label: QLabel) -> None:
@@ -592,6 +639,9 @@ class SchedulerConfigDialog(QDialog):
             "type": sched_type,
             "targets": targets,
             "leaf_only": self.leaf_only_check.isChecked(),
+            "fractional_enabled": self.fractional_enabled_check.isChecked(),
+            "notify_enabled": self.notify_enabled_check.isChecked(),
+            "notify_descendant_mode": self._notify_mode_value(),
         }
         if isinstance(sched.get("stagger_state"), dict):
             updated["stagger_state"] = dict(sched["stagger_state"])
@@ -637,6 +687,9 @@ class SchedulerConfigDialog(QDialog):
             "n": 3,
             "targets": [],
             "leaf_only": True,
+            "fractional_enabled": True,
+            "notify_enabled": False,
+            "notify_descendant_mode": "direct_only",
             "stagger": {"mode": "stable"},
         }
         schedules.append(sched)
@@ -668,6 +721,11 @@ class SchedulerConfigDialog(QDialog):
             "type": base.get("type", "every_n_days"),
             "targets": list(base.get("targets", [])),
             "leaf_only": bool(base.get("leaf_only", True)),
+            "fractional_enabled": bool(base.get("fractional_enabled", True)),
+            "notify_enabled": bool(base.get("notify_enabled", False)),
+            "notify_descendant_mode": str(
+                base.get("notify_descendant_mode", "direct_only")
+            ),
             "stagger": dict(base.get("stagger", {})) if base.get("stagger") else {"mode": "stable"},
         }
         if copied["type"] == "every_n_days":
@@ -786,6 +844,7 @@ class SchedulerConfigDialog(QDialog):
         if self._building or mw is None or mw.col is None:
             return
         self._commit_current()
+        self._refresh_feature_controls()
         if self._current_uid is None:
             return
 
@@ -796,13 +855,29 @@ class SchedulerConfigDialog(QDialog):
         deck_names = _all_deck_names()
         raw_matches = match_deck_names(sched.get("targets", []), deck_names)
         matches = filter_deck_names_for_schedule(sched, deck_names)
+        coverage_matches = matches
+        if not sched.get("fractional_enabled", True) and sched.get("notify_enabled", False):
+            raw_matches = match_deck_names_for_feature(
+                sched,
+                deck_names,
+                feature_key=FEATURE_NOTIFY,
+            )
+            coverage_matches = raw_matches
         skipped = max(0, len(raw_matches) - len(matches))
         self._update_target_summary(
             raw_matches,
-            matches,
+            coverage_matches,
             skipped,
             bool(sched.get("leaf_only", True)),
+            bool(sched.get("fractional_enabled", True)),
         )
+        if not sched.get("fractional_enabled", True):
+            label = "Notify badges only." if sched.get("notify_enabled", False) else "Inactive schedule."
+            self.preview_summary.setText(
+                f"{label} Fractional limits are disabled for this schedule, so no daily limit preview is shown."
+            )
+            self._clear_preview_table()
+            return
         if not matches:
             self.preview_summary.setText("No decks will receive limits with the current targets.")
             self._clear_preview_table()
@@ -863,7 +938,10 @@ class SchedulerConfigDialog(QDialog):
         for widget in (
             self.id_edit,
             self.type_combo,
+            self.fractional_enabled_check,
             self.leaf_only_check,
+            self.notify_enabled_check,
+            self.notify_mode_combo,
             self.m_spin,
             self.n_spin,
             self.stagger_mode,
@@ -916,6 +994,29 @@ class SchedulerConfigDialog(QDialog):
     def _update_type_help(self) -> None:
         sched_type = "every_n_days" if self.type_combo.currentIndex() == 0 else "dow"
         self.type_help.setText(TYPE_DESCRIPTIONS.get(sched_type, ""))
+
+    def _notify_mode_value(self) -> str:
+        value = self.notify_mode_combo.currentData()
+        return str(value) if value else "direct_only"
+
+    def _set_notify_mode(self, mode: str) -> None:
+        index = self.notify_mode_combo.findData(mode)
+        self.notify_mode_combo.setCurrentIndex(index if index >= 0 else 0)
+
+    def _update_notify_mode_help(self) -> None:
+        self.notify_mode_help.setText(
+            NOTIFY_MODE_DESCRIPTIONS.get(self._notify_mode_value(), "")
+        )
+
+    def _refresh_feature_controls(self) -> None:
+        notify_enabled = self.notify_enabled_check.isChecked()
+        fractional_enabled = self.fractional_enabled_check.isChecked()
+        self.notify_mode_combo.setEnabled(notify_enabled and self.notify_enabled_check.isEnabled())
+        self.leaf_only_check.setEnabled(
+            fractional_enabled and self.fractional_enabled_check.isEnabled()
+        )
+        self.leaf_only_help.setEnabled(fractional_enabled)
+        self._update_notify_mode_help()
 
     def _clear_preview_table(self) -> None:
         self.preview_table.clear()
@@ -1118,17 +1219,24 @@ class SchedulerConfigDialog(QDialog):
         applied_matches: List[str],
         skipped: int,
         leaf_only: bool,
+        fractional_enabled: bool,
     ) -> None:
+        action = "receive limits" if fractional_enabled else "be covered"
         if not raw_matches:
             self.target_summary.setText("No matching decks for the current targets.")
             return
+        if not fractional_enabled:
+            self.target_summary.setText(
+                f"{len(applied_matches)} decks will {action} with the current targets."
+            )
+            return
         if leaf_only and skipped:
             self.target_summary.setText(
-                f"{len(raw_matches)} decks matched. {len(applied_matches)} leaf decks will receive limits; {skipped} parent decks are skipped."
+                f"{len(raw_matches)} decks matched. {len(applied_matches)} leaf decks will {action}; {skipped} parent decks are skipped."
             )
             return
         self.target_summary.setText(
-            f"{len(applied_matches)} decks will receive limits with the current targets."
+            f"{len(applied_matches)} decks will {action} with the current targets."
         )
 
     def _ensure_unique_id(self, base_id: str, exclude_uid: Optional[str] = None) -> str:
@@ -1178,6 +1286,7 @@ class SchedulerConfigDialog(QDialog):
         if mw is None:
             return
         mw.addonManager.writeConfig(self.module, config_to_dict(self.config))
+        refresh_deck_browser()
 
 
 def _all_deck_names() -> List[str]:

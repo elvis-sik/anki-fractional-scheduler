@@ -1,6 +1,9 @@
 # Anki Fractional New-Card Scheduler
 
-An Anki add-on to schedule fractional new cards per deck or deck groups, e.g. "1 every 3 days" or a day-of-week schedule, by automatically adjusting Today-Only new-card limits.
+An Anki add-on for two related jobs:
+
+- schedule fractional new cards per deck or deck groups, e.g. "1 every 3 days" or a day-of-week schedule, by automatically adjusting Today-Only new-card limits
+- show deck-list warning badges when decks or monitored descendants are blocked by `0/day` limits or have no unsuspended new cards available
 
 ## Status
 - Scheduler logic is implemented.
@@ -14,12 +17,14 @@ An Anki add-on to schedule fractional new cards per deck or deck groups, e.g. "1
 4. Use `Tools -> Apply Fractional Schedule Now` to force an immediate apply.
 
 ## Features
+- Each schedule can enable fractional limits, notify badges, both, or neither.
 - `Every N Days` schedules such as 1 card every 3 days.
 - Day-of-week schedules with separate values for Mon-Sun.
-- Multiple deck targets per schedule using exact names or wildcard prefixes.
+- Multiple deck targets per schedule using exact names or shell-style wildcards.
 - `Pick deck...` adds exact targets immediately, and `Add wildcard...` adds wildcard targets from the deck picker.
 - Optional staggering across matched decks: stable balanced or off.
-- Leaf-only matching so container decks do not receive limits.
+- Fractional-only `leaf_only` matching so container decks do not receive limits.
+- Per-schedule notify descendant modes: direct only, any blocked descendant, all blocked descendants, or hide container badges.
 - Filtered decks are skipped.
 - Automatic apply on profile open, collection open, and optionally sync, with an at-most-once-per-day guard.
 - Preview table for the next 14 days, including daily totals, persistent column widths, and grouping by identical schedules.
@@ -57,16 +62,22 @@ The service only includes matched, non-dynamic decks that survive `leaf_only` fi
       "m": 1,
       "n": 3,
       "targets": ["Biology::*"],
+      "fractional_enabled": true,
+      "notify_enabled": true,
+      "notify_descendant_mode": "direct_only",
       "leaf_only": true,
       "stagger": {"mode": "stable"}
     },
     {
-      "id": "langs-weekly",
-      "type": "dow",
-      "by_day": {"Mon": 2, "Tue": 0, "Wed": 1, "Thu": 0, "Fri": 1, "Sat": 0, "Sun": 0},
-      "targets": ["Languages::Japanese", "Languages::Korean", "Languages::EastAsian::*"],
-      "leaf_only": true,
-      "stagger": {"mode": "stable"}
+      "id": "chemistry-notify",
+      "type": "every_n_days",
+      "m": 1,
+      "n": 1,
+      "targets": ["*Chemistry*"],
+      "fractional_enabled": false,
+      "notify_enabled": true,
+      "notify_descendant_mode": "all_included_descendants_blocked",
+      "leaf_only": true
     }
   ],
   "defaults": {
@@ -85,7 +96,9 @@ The service only includes matched, non-dynamic decks that survive `leaf_only` fi
 - For `every_n_days`, a day with `0` newly introduced cards does not consume that deck's slot; the cycle resumes when you actually introduce the next new card.
 - When staggering is enabled, existing decks keep their assigned offsets and newly matched decks are placed into the lightest current phase for that schedule.
 - For `dow`, it applies the specified weekday limits (optionally rotated per deck if staggering is enabled).
-- Matching is by exact deck name or prefix using a trailing `*`.
+- Matching is by exact deck name or shell-style wildcard.
+- Notify schedules are assigned independently from fractional schedules, so a notify-only rule cannot steal fractional ownership from a deck.
+- Notify exact targets can include descendants when the schedule's notify mode is not `direct_only`.
 - Matching decks are grouped in the preview when they share the same visible schedule pattern.
 
 ## Notes

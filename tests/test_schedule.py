@@ -166,5 +166,103 @@ class StableBalancedPhaseTests(unittest.TestCase):
         )
 
 
+class FeatureAssignmentTests(unittest.TestCase):
+    def test_notify_assignment_can_inherit_descendants_from_exact_parent_target(self) -> None:
+        schedules = [
+            {
+                "id": "notify-parent",
+                "type": "every_n_days",
+                "m": 1,
+                "n": 1,
+                "targets": ["Parent"],
+                "fractional_enabled": False,
+                "notify_enabled": True,
+                "notify_descendant_mode": "any_blocked_descendant",
+            }
+        ]
+        decks = [deck(1, "Parent"), deck(2, "Parent::Child")]
+
+        assignments, _schedule_to_decks = schedule.schedule_assignments_for_feature(
+            decks,
+            schedules,
+            schedule.FEATURE_NOTIFY,
+        )
+
+        self.assertEqual(assignments[1]["id"], "notify-parent")
+        self.assertEqual(assignments[2]["id"], "notify-parent")
+
+    def test_more_specific_notify_schedule_wins_over_parent_inheritance(self) -> None:
+        schedules = [
+            {
+                "id": "notify-parent",
+                "type": "every_n_days",
+                "m": 1,
+                "n": 1,
+                "targets": ["Parent"],
+                "fractional_enabled": False,
+                "notify_enabled": True,
+                "notify_descendant_mode": "any_blocked_descendant",
+            },
+            {
+                "id": "notify-child",
+                "type": "every_n_days",
+                "m": 1,
+                "n": 1,
+                "targets": ["Parent::Child"],
+                "fractional_enabled": False,
+                "notify_enabled": True,
+                "notify_descendant_mode": "direct_only",
+            },
+        ]
+        decks = [deck(1, "Parent"), deck(2, "Parent::Child")]
+
+        assignments, _schedule_to_decks = schedule.schedule_assignments_for_feature(
+            decks,
+            schedules,
+            schedule.FEATURE_NOTIFY,
+        )
+
+        self.assertEqual(assignments[1]["id"], "notify-parent")
+        self.assertEqual(assignments[2]["id"], "notify-child")
+
+    def test_fractional_assignment_ignores_notify_only_schedule(self) -> None:
+        schedules = [
+            {
+                "id": "notify-only",
+                "type": "every_n_days",
+                "m": 1,
+                "n": 1,
+                "targets": ["Parent::*"],
+                "fractional_enabled": False,
+                "notify_enabled": True,
+                "notify_descendant_mode": "any_blocked_descendant",
+            },
+            {
+                "id": "fractional",
+                "type": "every_n_days",
+                "m": 1,
+                "n": 3,
+                "targets": ["Parent::*"],
+                "fractional_enabled": True,
+                "notify_enabled": False,
+                "leaf_only": True,
+            },
+        ]
+        decks = [deck(1, "Parent::Child")]
+
+        assignments, _schedule_to_decks = schedule.schedule_assignments_for_feature(
+            decks,
+            schedules,
+            schedule.FEATURE_FRACTIONAL,
+        )
+
+        self.assertEqual(assignments[1]["id"], "fractional")
+
+    def test_general_wildcard_matching_supports_legacy_contains_patterns(self) -> None:
+        matches = schedule.match_deck_names(["*Chemistry*"], ["Organic Chemistry", "Biology"])
+
+        self.assertEqual(matches, ["Organic Chemistry"])
+
+
 if __name__ == "__main__":
     unittest.main()

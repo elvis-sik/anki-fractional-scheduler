@@ -3,6 +3,7 @@ from __future__ import annotations
 from .api import FractionalSchedulerAPI
 from .apply import apply_limits
 from .config import load_config, save_config
+from .notify import decorate_deck_browser
 from .schedule import compute_deck_limits
 from .ui import SchedulerConfigDialog
 
@@ -163,6 +164,13 @@ def _setup_menu() -> None:
         pass
 
 
+def _decorate_decks_screen(deck_browser, content) -> None:
+    if mw is None or mw.col is None:
+        return
+    config = load_config(__name__)
+    decorate_deck_browser(deck_browser, content, config)
+
+
 if mw is not None:
     _register_api_service()
 
@@ -174,4 +182,6 @@ if gui_hooks is not None:
         gui_hooks.collection_did_load.append(_on_collection_open)
     if hasattr(gui_hooks, "sync_did_finish"):
         gui_hooks.sync_did_finish.append(_on_sync_finish)
+    if hasattr(gui_hooks, "deck_browser_will_render_content"):
+        gui_hooks.deck_browser_will_render_content.append(_decorate_decks_screen)
     gui_hooks.main_window_did_init.append(_setup_menu)

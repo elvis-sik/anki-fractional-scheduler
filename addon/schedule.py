@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fnmatch
 import time
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -7,6 +8,8 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 
 VALID_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+FEATURE_FRACTIONAL = "fractional_enabled"
+FEATURE_NOTIFY = "notify_enabled"
 
 
 @dataclass(frozen=True)
@@ -95,6 +98,21 @@ def match_deck_names(targets: Iterable[str], deck_names: Iterable[str]) -> List[
     return matches
 
 
+def match_deck_names_for_feature(
+    schedule: Dict[str, Any],
+    deck_names: Iterable[str],
+    *,
+    feature_key: str,
+) -> List[str]:
+    matches: List[str] = []
+    for name in deck_names:
+        for target in schedule.get("targets", []):
+            if _target_match_for_feature(target, name, schedule, feature_key) is not None:
+                matches.append(name)
+                break
+    return matches
+
+
 def filter_deck_names_for_schedule(
     schedule: Dict[str, Any], deck_names: Iterable[str]
 ) -> List[str]:
@@ -171,28 +189,37 @@ def rebalance_schedule_offsets(col, schedule: Dict[str, Any]) -> Dict[int, int]:
 
 
 def _target_matches(target: str, deck_name: str) -> Optional[Tuple[int, int]]:
-    if target.endswith("*"):
+    if deck_name == target:
+        return (3, len(target))
+    if target.endswith("*") and "*" not in target[:-1] and "?" not in target:
         prefix = target[:-1]
         if deck_name.startswith(prefix):
-            return (1, len(prefix))
+            return (2, len(prefix))
         return None
-    if deck_name == target:
-        return (2, len(target))
+    if "*" in target or "?" in target:
+        if fnmatch.fnmatchcase(deck_name.lower(), target.lower()):
+            literal_chars = len(target.replace("*", "").replace("?", ""))
+            return (1, literal_chars)
     return None
 
 
 def _best_schedule_for_deck(
-    deck_name: str, schedules: List[Dict[str, Any]]
+    deck_name: str,
+    schedules: List[Dict[str, Any]],
+    *,
+    feature_key: str = FEATURE_FRACTIONAL,
 ) -> Optional[Dict[str, Any]]:
     best = None
     best_score: Tuple[int, int, int] = (-1, -1, -1)
 
     for idx, sched in enumerate(schedules):
+        if not _schedule_feature_enabled(sched, feature_key):
+            continue
         targets = sched.get("targets") or []
         best_target_score: Optional[Tuple[int, int]] = None
 
         for target in targets:
-            match = _target_matches(target, deck_name)
+            match = _target_match_for_feature(target, deck_name, sched, feature_key)
             if match is None:
                 continue
             if best_target_score is None or match > best_target_score:
@@ -209,6 +236,34 @@ def _best_schedule_for_deck(
             best_score = score
 
     return best
+
+
+def _target_match_for_feature(
+    target: str,
+    deck_name: str,
+    schedule: Dict[str, Any],
+    feature_key: str,
+) -> Optional[Tuple[int, int]]:
+    if feature_key != FEATURE_NOTIFY:
+        return _target_matches(target, deck_name)
+
+    direct_match = _target_matches(target, deck_name)
+    if direct_match is not None:
+        return direct_match
+
+    if schedule.get("notify_descendant_mode") == "direct_only":
+        return None
+    if "*" in target or "?" in target:
+        return None
+    if deck_name.startswith(f"{target}::"):
+        return (2, len(target))
+    return None
+
+
+def _schedule_feature_enabled(schedule: Dict[str, Any], feature_key: str) -> bool:
+    if feature_key == FEATURE_NOTIFY:
+        return bool(schedule.get("notify_enabled", False))
+    return bool(schedule.get("fractional_enabled", True))
 
 
 def _schedule_cycle_length(schedule: Dict[str, Any]) -> int:
@@ -286,7 +341,11 @@ def _stable_stagger_state(schedule: Dict[str, Any], modulo: int) -> Dict[str, An
 
 def compute_deck_limits(col, config) -> List[DeckLimit]:
     decks = _collect_decks(col)
-    assignments, schedule_to_decks = _schedule_assignments(decks, config.schedules)
+    assignments, schedule_to_decks = _schedule_assignments(
+        decks,
+        config.schedules,
+        feature_key=FEATURE_FRACTIONAL,
+    )
     calendar_state = _calendar_state(col, config.epoch)
     every_n_day_indices = _effective_every_n_days_day_indices(
         col,
@@ -322,7 +381,11 @@ def compute_deck_limits(col, config) -> List[DeckLimit]:
 
 def compute_schedule_health_snapshot(col, config) -> Dict[int, FractionalDeckHealth]:
     decks = _collect_decks(col)
-    assignments, schedule_to_decks = _schedule_assignments(decks, config.schedules)
+    assignments, schedule_to_decks = _schedule_assignments(
+        decks,
+        config.schedules,
+        feature_key=FEATURE_FRACTIONAL,
+    )
     calendar_state = _calendar_state(col, config.epoch)
     every_n_day_indices = _effective_every_n_days_day_indices(
         col,
@@ -371,17 +434,27 @@ def compute_schedule_health_snapshot(col, config) -> Dict[int, FractionalDeckHea
 
 
 def _schedule_assignments(
-    decks: List[DeckInfo], schedules: List[Dict[str, Any]]
+    decks: List[DeckInfo],
+    schedules: List[Dict[str, Any]],
+    *,
+    feature_key: str = FEATURE_FRACTIONAL,
 ) -> Tuple[Dict[int, Dict[str, Any]], Dict[str, List[DeckInfo]]]:
     assignments: Dict[int, Dict[str, Any]] = {}
+    enabled_schedules = [
+        sched for sched in schedules if _schedule_feature_enabled(sched, feature_key)
+    ]
 
     for deck in decks:
         if deck.is_dynamic:
             continue
-        sched = _best_schedule_for_deck(deck.name, schedules)
+        sched = _best_schedule_for_deck(
+            deck.name,
+            enabled_schedules,
+            feature_key=feature_key,
+        )
         if sched is None:
             continue
-        if sched.get("leaf_only", True) and deck.has_children:
+        if feature_key == FEATURE_FRACTIONAL and sched.get("leaf_only", True) and deck.has_children:
             continue
         assignments[deck.deck_id] = sched
 
@@ -393,6 +466,18 @@ def _schedule_assignments(
         schedule_to_decks.setdefault(str(sched["id"]), []).append(deck)
 
     return assignments, schedule_to_decks
+
+
+def schedule_assignments_for_feature(
+    decks: List[DeckInfo],
+    schedules: List[Dict[str, Any]],
+    feature_key: str,
+) -> Tuple[Dict[int, Dict[str, Any]], Dict[str, List[DeckInfo]]]:
+    return _schedule_assignments(decks, schedules, feature_key=feature_key)
+
+
+def collect_decks(col) -> List[DeckInfo]:
+    return _collect_decks(col)
 
 
 def _calendar_state(col, epoch: str) -> Dict[str, int]:
