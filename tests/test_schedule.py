@@ -130,6 +130,41 @@ class StableBalancedPhaseTests(unittest.TestCase):
 
         self.assertEqual(phases, {1: 0, 2: 1, 3: 0, 4: 1})
 
+    def test_rebalance_schedule_offsets_rebuilds_assignments_from_current_matches(self) -> None:
+        class FakeCol:
+            def __init__(self, decks: list[schedule.DeckInfo]) -> None:
+                self._decks = decks
+                self.decks = self
+
+            def all_names_and_ids(self):
+                return [{"name": deck.name, "id": deck.deck_id} for deck in self._decks]
+
+            def get(self, deck_id: int):
+                return {"id": deck_id, "name": next(deck.name for deck in self._decks if deck.deck_id == deck_id), "dyn": False}
+
+        sched = {
+            "type": "every_n_days",
+            "n": 3,
+            "m": 1,
+            "targets": ["Parent::*"],
+            "leaf_only": True,
+            "stagger": {"mode": "stable"},
+            "stagger_state": {
+                "schedule_type": "every_n_days",
+                "cycle_length": 3,
+                "assignments": {"1": 0, "2": 1, "3": 2},
+            },
+        }
+        col = FakeCol([deck(1, "Parent::A"), deck(3, "Parent::C"), deck(4, "Parent::D")])
+
+        phases = schedule.rebalance_schedule_offsets(col, sched)
+
+        self.assertEqual(phases, {1: 0, 3: 1, 4: 2})
+        self.assertEqual(
+            sched["stagger_state"]["assignments"],
+            {"1": 0, "3": 1, "4": 2},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

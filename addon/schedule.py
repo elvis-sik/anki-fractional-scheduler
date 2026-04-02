@@ -157,6 +157,19 @@ def preview_schedule(
     return results
 
 
+def rebalance_schedule_offsets(col, schedule: Dict[str, Any]) -> Dict[int, int]:
+    if col is None:
+        return {}
+
+    decks = _matched_decks_for_schedule(col, schedule)
+    if not decks:
+        schedule.pop("stagger_state", None)
+        return {}
+
+    schedule.pop("stagger_state", None)
+    return _assign_phases(schedule, decks)
+
+
 def _target_matches(target: str, deck_name: str) -> Optional[Tuple[int, int]]:
     if target.endswith("*"):
         prefix = target[:-1]
@@ -628,6 +641,12 @@ def _decks_for_names(col, deck_names: List[str]) -> List[DeckInfo]:
         return []
     wanted = set(deck_names)
     return [deck for deck in _collect_decks(col) if deck.name in wanted]
+
+
+def _matched_decks_for_schedule(col, schedule: Dict[str, Any]) -> List[DeckInfo]:
+    all_decks = _collect_decks(col)
+    matched_names = set(filter_deck_names_for_schedule(schedule, [deck.name for deck in all_decks]))
+    return [deck for deck in all_decks if deck.name in matched_names]
 
 
 def _deck_name_and_id(entry: Any) -> Tuple[Optional[str], Optional[int]]:

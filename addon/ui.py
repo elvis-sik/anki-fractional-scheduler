@@ -36,7 +36,12 @@ from aqt.qt import (
 )
 
 from .config import DEFAULT_CONFIG, config_to_dict, normalize_config
-from .schedule import filter_deck_names_for_schedule, match_deck_names, preview_schedule
+from .schedule import (
+    filter_deck_names_for_schedule,
+    match_deck_names,
+    preview_schedule,
+    rebalance_schedule_offsets,
+)
 
 
 VALID_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -168,6 +173,21 @@ class SchedulerConfigDialog(QDialog):
         autosave_note = QLabel("Changes save automatically.")
         autosave_note.setStyleSheet("color: palette(mid);")
         schedule_tab_layout.addWidget(autosave_note)
+
+        action_row = QHBoxLayout()
+        self.rebalance_btn = QPushButton("Rebalance Offsets")
+        self.rebalance_btn.setToolTip(
+            "Recompute stable stagger offsets for the selected schedule using the decks that match right now."
+        )
+        self.rebalance_btn.clicked.connect(self._rebalance_current_schedule)
+        self.rebalance_help = QLabel(
+            "Useful after deck additions or moves. This updates the preview only; apply limits separately."
+        )
+        self.rebalance_help.setWordWrap(True)
+        self.rebalance_help.setStyleSheet("color: palette(mid);")
+        action_row.addWidget(self.rebalance_btn)
+        action_row.addWidget(self.rebalance_help, 1)
+        schedule_tab_layout.addLayout(action_row)
 
         schedule_box = QGroupBox("Schedule")
         schedule_form = QFormLayout(schedule_box)
@@ -769,6 +789,17 @@ class SchedulerConfigDialog(QDialog):
         self.target_list.takeItem(row)
         self._refresh_preview()
 
+    def _rebalance_current_schedule(self) -> None:
+        if self._building or mw is None or mw.col is None:
+            return
+        self._commit_current()
+        sched = self._current_schedule()
+        if sched is None:
+            return
+        rebalance_schedule_offsets(mw.col, sched)
+        self._persist_config()
+        self._refresh_preview()
+
     def _refresh_preview(self) -> None:
         if self._building or mw is None or mw.col is None:
             return
@@ -862,6 +893,7 @@ class SchedulerConfigDialog(QDialog):
             self.target_add,
             self.target_remove,
             self.target_list,
+            self.rebalance_btn,
         ):
             widget.setEnabled(enabled)
         self.btn_add.setAutoDefault(False)
