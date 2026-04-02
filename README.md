@@ -14,7 +14,6 @@ An Anki add-on for two related jobs:
 1. Copy the `addon` folder into your Anki add-ons directory as its own folder (e.g. `FractionalScheduler`).
 2. Restart Anki.
 3. Use `Tools -> Fractional Scheduler: Open Config` to edit config.
-4. Use `Tools -> Apply Fractional Schedule Now` to force an immediate apply.
 
 ## Features
 - Each schedule can enable fractional limits, notify badges, both, or neither.
@@ -29,7 +28,6 @@ An Anki add-on for two related jobs:
 - Automatic apply on profile open, collection open, and optionally sync, with an at-most-once-per-day guard.
 - Preview table for the next 14 days, including daily totals, persistent column widths, and grouping by identical schedules.
 - `Rebalance Offsets` recomputes stable stagger assignments for the currently matched decks in a schedule.
-- Immediate manual apply action from the Tools menu.
 - Read-only API for other add-ons via `mw.fractional_scheduler_api`.
 
 ## Public API

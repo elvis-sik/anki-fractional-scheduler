@@ -10,12 +10,10 @@ from .ui import SchedulerConfigDialog
 try:
     from aqt import mw, gui_hooks
     from aqt.qt import QAction
-    from aqt.utils import tooltip
 except Exception:  # pragma: no cover
     mw = None
     gui_hooks = None
     QAction = None
-    tooltip = None
 
 
 LAST_APPLIED_DAY_CONFIG_KEY = "fractional_scheduler.last_applied_day"
@@ -122,20 +120,6 @@ def _on_sync_finish() -> None:
     _apply(mw.col, "sync_finish")
 
 
-def _apply_now() -> None:
-    if mw is None or mw.col is None:
-        return
-    applied, total, dry_run = _apply(mw.col, "manual")
-    if hasattr(mw, "reset"):
-        try:
-            mw.reset()
-        except Exception:
-            pass
-    if tooltip is not None:
-        mode = "dry-run: " if dry_run else ""
-        tooltip(f"Fractional scheduler {mode}applied {applied}/{total} deck limits.", period=3500)
-
-
 def _open_config() -> bool:
     if mw is None:
         return False
@@ -149,10 +133,6 @@ def _setup_menu() -> None:
         return
 
     _register_api_service()
-
-    action_apply = QAction("Apply Fractional Schedule Now", mw)
-    action_apply.triggered.connect(_apply_now)
-    mw.form.menuTools.addAction(action_apply)
 
     action_config = QAction("Fractional Scheduler: Open Config", mw)
     action_config.triggered.connect(_open_config)
