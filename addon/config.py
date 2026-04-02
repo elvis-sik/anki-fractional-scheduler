@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-from pathlib import Path
 import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -68,11 +66,8 @@ def _get_config(addon_name: str) -> Dict[str, Any]:
 
 
 def load_config(addon_name: str) -> AddonConfig:
-    raw, imported = _maybe_import_legacy_notify_config(_get_config(addon_name))
-    normalized = normalize_config(raw)
-    if imported and mw is not None:
-        mw.addonManager.writeConfig(addon_name, config_to_dict(normalized))
-    return normalized
+    raw = _get_config(addon_name)
+    return normalize_config(raw)
 
 
 def save_config(addon_name: str, config: AddonConfig | Dict[str, Any]) -> None:
@@ -188,66 +183,6 @@ def _normalize_notify_descendant_mode(value: Any) -> str:
     return mode
 
 
-def _maybe_import_legacy_notify_config(raw: Dict[str, Any]) -> tuple[Dict[str, Any], bool]:
-    migration = dict(DEFAULT_CONFIG["migration"])
-    migration.update(raw.get("migration") or {})
-    if migration.get("notify_empty_decks_imported"):
-        return raw, False
-
-    schedules = raw.get("schedules") or []
-    if any(isinstance(schedule, dict) and schedule.get("notify_enabled") for schedule in schedules):
-        return raw, False
-
-    legacy_path = Path(__file__).resolve().parents[2] / "notify-empty-decks" / "config.json"
-    if not legacy_path.exists():
-        return raw, False
-
-    try:
-        legacy = json.loads(legacy_path.read_text(encoding="utf-8"))
-    except Exception:
-        return raw, False
-
-    if not isinstance(legacy, dict):
-        return raw, False
-
-    include_patterns = legacy.get("include_patterns") or []
-    exclude_patterns = legacy.get("exclude_patterns") or []
-    use_regex = bool(legacy.get("use_regex_patterns", False))
-    if use_regex or exclude_patterns:
-        return raw, False
-    if not isinstance(include_patterns, list):
-        return raw, False
-
-    imported_schedules = list(schedules)
-    notify_mode = _normalize_notify_descendant_mode(legacy.get("container_deck_mode"))
-    for pattern in include_patterns:
-        if not isinstance(pattern, str) or not pattern.strip():
-            continue
-        imported_schedules.append(
-            {
-                "_uid": str(uuid.uuid4()),
-                "id": f"Notify {pattern.strip()}",
-                "type": "every_n_days",
-                "m": 1,
-                "n": 1,
-                "targets": [pattern.strip()],
-                "leaf_only": True,
-                "fractional_enabled": False,
-                "notify_enabled": True,
-                "notify_descendant_mode": notify_mode,
-            }
-        )
-
-    if len(imported_schedules) == len(schedules):
-        return raw, False
-
-    imported = dict(raw)
-    imported["schedules"] = imported_schedules
-    imported_migration = dict(migration)
-    imported_migration["notify_empty_decks_imported"] = True
-    imported_migration["notify_empty_decks_status"] = "imported"
-    imported["migration"] = imported_migration
-    return imported, True
 
 
 def _normalize_stagger_state(raw_state: Any) -> Optional[Dict[str, Any]]:
