@@ -14,6 +14,7 @@ An Anki add-on for two related jobs:
 1. Copy the `addon` folder into your Anki add-ons directory as its own folder (e.g. `FractionalScheduler`).
 2. Restart Anki.
 3. Use `Tools -> Fractional Scheduler: Open Config` to edit config.
+4. Configure notify badges in that same scheduler dialog; there is no separate Notify Empty Decks settings window anymore.
 
 ## Features
 - Each schedule can enable fractional limits, notify badges, both, or neither.
@@ -103,4 +104,5 @@ The service only includes matched, non-dynamic decks that survive `leaf_only` fi
 - If you use a non-midnight Anki day rollover, the epoch calculation respects the rollover hour.
 - The config dialog autosaves; there is no separate Save button.
 - `Rebalance Offsets` updates stored stagger assignments and preview data; deck limits change on the next apply.
+- Notify badges are configured per schedule inside the main Fractional Scheduler dialog.
 - `addon/meta.json` is local Anki state and is intentionally not tracked in git.
