@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from .api import FractionalSchedulerAPI
 from .apply import apply_limits
-from .config import load_config
+from .config import load_config, save_config
 from .schedule import compute_deck_limits
 from .ui import SchedulerConfigDialog
 
@@ -80,6 +80,7 @@ def _apply(col, source: str) -> tuple[int, int, bool]:
     dry_run = bool(config.defaults.get("dry_run", False))
 
     limits = compute_deck_limits(col, config)
+    save_config(__name__, config)
     applied = apply_limits(col, limits, dry_run=dry_run)
 
     if not dry_run:

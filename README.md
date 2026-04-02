@@ -17,7 +17,7 @@ An Anki add-on to schedule fractional new cards per deck or deck groups, e.g. "1
 - `Every N Days` schedules such as 1 card every 3 days.
 - Day-of-week schedules with separate values for Mon-Sun.
 - Multiple deck targets per schedule using exact names or wildcard prefixes.
-- Optional staggering across matched decks: balanced, hashed, or off.
+- Optional staggering across matched decks: stable balanced or off.
 - Leaf-only matching so container decks do not receive limits.
 - Filtered decks are skipped.
 - Automatic apply on profile open, collection open, and optionally sync, with an at-most-once-per-day guard.
@@ -56,7 +56,7 @@ The service only includes matched, non-dynamic decks that survive `leaf_only` fi
       "n": 3,
       "targets": ["Biology::*"],
       "leaf_only": true,
-      "stagger": {"mode": "balanced"}
+      "stagger": {"mode": "stable"}
     },
     {
       "id": "langs-weekly",
@@ -64,7 +64,7 @@ The service only includes matched, non-dynamic decks that survive `leaf_only` fi
       "by_day": {"Mon": 2, "Tue": 0, "Wed": 1, "Thu": 0, "Fri": 1, "Sat": 0, "Sun": 0},
       "targets": ["Languages::Japanese", "Languages::Korean", "Languages::EastAsian::*"],
       "leaf_only": true,
-      "stagger": {"mode": "hash", "seed": "langs-v1"}
+      "stagger": {"mode": "stable"}
     }
   ],
   "defaults": {
@@ -81,6 +81,7 @@ The service only includes matched, non-dynamic decks that survive `leaf_only` fi
 ## How It Works
 - For `every_n_days`, the add-on uses a deterministic, evenly spaced pattern (Bresenham-style) and optional staggering per deck.
 - For `every_n_days`, a day with `0` newly introduced cards does not consume that deck's slot; the cycle resumes when you actually introduce the next new card.
+- When staggering is enabled, existing decks keep their assigned offsets and newly matched decks are placed into the lightest current phase for that schedule.
 - For `dow`, it applies the specified weekday limits (optionally rotated per deck if staggering is enabled).
 - Matching is by exact deck name or prefix using a trailing `*`.
 - Matching decks are grouped in the preview when they share the same visible schedule pattern.

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import uuid
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 try:
@@ -35,6 +35,9 @@ DEFAULT_CONFIG = {
 }
 
 
+VALID_STAGGER_MODES = {"stable", "balanced", "hash"}
+
+
 def _log(level: str, message: str) -> None:
     if mw is None:
         return
@@ -53,6 +56,30 @@ def _get_config(addon_name: str) -> Dict[str, Any]:
 def load_config(addon_name: str) -> AddonConfig:
     raw = _get_config(addon_name)
     return normalize_config(raw)
+
+
+def save_config(addon_name: str, config: AddonConfig | Dict[str, Any]) -> None:
+    if mw is None:
+        return
+    mw.addonManager.writeConfig(addon_name, config_to_dict(config))
+
+
+def config_to_dict(config: AddonConfig | Dict[str, Any]) -> Dict[str, Any]:
+    if isinstance(config, AddonConfig):
+        source = {
+            "epoch": config.epoch,
+            "schedules": config.schedules,
+            "defaults": config.defaults,
+        }
+    else:
+        source = config
+
+    normalized = normalize_config(source)
+    return {
+        "epoch": normalized.epoch,
+        "schedules": [_schedule_to_dict(sched) for sched in normalized.schedules],
+        "defaults": dict(normalized.defaults),
+    }
 
 
 def normalize_config(raw: Dict[str, Any]) -> AddonConfig:
@@ -105,14 +132,73 @@ def normalize_config(raw: Dict[str, Any]) -> AddonConfig:
 
         stagger = sched.get("stagger")
         if stagger is not None:
-            if not isinstance(stagger, dict) or stagger.get("mode") not in {"balanced", "hash"}:
+            if not isinstance(stagger, dict) or stagger.get("mode") not in VALID_STAGGER_MODES:
                 _log("warn", f"Ignoring stagger for {normalized['id']}: invalid mode")
             else:
                 normalized["stagger"] = {
-                    "mode": stagger.get("mode"),
-                    "seed": str(stagger.get("seed") or ""),
+                    "mode": "stable",
                 }
+
+        stagger_state = _normalize_stagger_state(sched.get("stagger_state"))
+        if stagger_state is not None:
+            normalized["stagger_state"] = stagger_state
 
         schedules.append(normalized)
 
     return AddonConfig(epoch=epoch, schedules=schedules, defaults=defaults)
+
+
+def _normalize_stagger_state(raw_state: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(raw_state, dict):
+        return None
+
+    assignments_in = raw_state.get("assignments")
+    assignments: Dict[str, int] = {}
+    if isinstance(assignments_in, dict):
+        for raw_deck_id, raw_phase in assignments_in.items():
+            try:
+                deck_id = str(int(raw_deck_id))
+                phase = int(raw_phase)
+            except Exception:
+                continue
+            if phase >= 0:
+                assignments[deck_id] = phase
+
+    normalized: Dict[str, Any] = {"assignments": assignments}
+
+    schedule_type = raw_state.get("schedule_type")
+    if isinstance(schedule_type, str) and schedule_type in VALID_TYPES:
+        normalized["schedule_type"] = schedule_type
+
+    try:
+        cycle_length = int(raw_state.get("cycle_length"))
+    except Exception:
+        cycle_length = None
+    if cycle_length is not None and cycle_length > 0:
+        normalized["cycle_length"] = cycle_length
+
+    return normalized
+
+
+def _schedule_to_dict(sched: Dict[str, Any]) -> Dict[str, Any]:
+    persisted: Dict[str, Any] = {
+        "id": str(sched.get("id", "")),
+        "type": str(sched.get("type", "every_n_days")),
+        "targets": list(sched.get("targets", []) or []),
+        "leaf_only": bool(sched.get("leaf_only", True)),
+    }
+
+    if persisted["type"] == "every_n_days":
+        persisted["m"] = int(sched.get("m", 1))
+        persisted["n"] = int(sched.get("n", 3))
+    else:
+        persisted["by_day"] = dict(sched.get("by_day", {}) or {})
+
+    if sched.get("stagger") is not None:
+        persisted["stagger"] = {"mode": "stable"}
+
+    stagger_state = _normalize_stagger_state(sched.get("stagger_state"))
+    if stagger_state is not None:
+        persisted["stagger_state"] = stagger_state
+
+    return persisted

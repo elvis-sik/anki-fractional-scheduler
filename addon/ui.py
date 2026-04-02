@@ -35,19 +35,17 @@ from aqt.qt import (
     QWidget,
 )
 
-from .config import DEFAULT_CONFIG, normalize_config
+from .config import DEFAULT_CONFIG, config_to_dict, normalize_config
 from .schedule import filter_deck_names_for_schedule, match_deck_names, preview_schedule
 
 
 VALID_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 STAGGER_OPTIONS = [
-    ("Balanced", "balanced"),
-    ("Hashed", "hash"),
+    ("Stable balanced", "stable"),
     ("Off", "none"),
 ]
 STAGGER_DESCRIPTIONS = {
-    "balanced": "Spread matching decks across the cycle as evenly as possible.",
-    "hash": "Assign each matching deck a stable pseudo-random offset. Use a seed if you want a different arrangement.",
+    "stable": "Keep existing deck offsets stable and place newly matched decks into the lightest phase.",
     "none": "Do not offset decks. Matching decks follow the same schedule on the same days.",
 }
 TYPE_DESCRIPTIONS = {
@@ -75,6 +73,13 @@ def _copy_schedule(sched: Dict[str, Any]) -> Dict[str, Any]:
     stagger = sched.get("stagger")
     if stagger:
         copied["stagger"] = dict(stagger)
+    stagger_state = sched.get("stagger_state")
+    if isinstance(stagger_state, dict):
+        copied["stagger_state"] = {
+            "assignments": dict(stagger_state.get("assignments", {}) or {}),
+            "schedule_type": str(stagger_state.get("schedule_type", "")),
+            "cycle_length": int(stagger_state.get("cycle_length", 0) or 0),
+        }
 
     return copied
 
@@ -181,7 +186,7 @@ class SchedulerConfigDialog(QDialog):
         self.leaf_only_check.stateChanged.connect(self._refresh_preview)
 
         name_label = QLabel("Name")
-        name_label.setToolTip("Shown in the schedule list and used as the default hash seed.")
+        name_label.setToolTip("Shown in the schedule list.")
         type_label = QLabel("Rule type")
         type_label.setToolTip("Determines how daily new-card limits are computed.")
         self.type_combo.setToolTip(
@@ -392,7 +397,7 @@ class SchedulerConfigDialog(QDialog):
 
         self.stagger_seed = QLineEdit()
         self.stagger_seed.setEnabled(False)
-        self.stagger_seed.setPlaceholderText("Optional: change the hashed arrangement")
+        self.stagger_seed.setPlaceholderText("Unused in stable mode")
 
         m_label = QLabel("Cards per cycle")
         m_label.setToolTip("How many new cards to introduce per cycle.")
@@ -402,12 +407,12 @@ class SchedulerConfigDialog(QDialog):
         layout.addRow(n_label, self.n_spin)
         stagger_label = QLabel("Stagger")
         stagger_label.setToolTip("Spread decks across days so they don't all introduce cards on the same day.")
-        self.stagger_mode.setToolTip("Controls whether matching decks are offset from each other and how those offsets are chosen.")
+        self.stagger_mode.setToolTip("Controls whether matching decks are offset from each other.")
         self.stagger_help = QLabel()
         self.stagger_help.setWordWrap(True)
         self.stagger_help.setStyleSheet("color: palette(mid);")
-        self.stagger_seed_label = QLabel("Hash seed")
-        self.stagger_seed_label.setToolTip("Optional: change which decks land on which days when using Hashed.")
+        self.stagger_seed_label = QLabel("Advanced seed")
+        self.stagger_seed_label.setToolTip("No longer used.")
         self._set_seed_controls_visible(
             self.stagger_seed_label, self.stagger_seed, False
         )
@@ -446,10 +451,10 @@ class SchedulerConfigDialog(QDialog):
 
         self.dow_stagger_mode = QComboBox()
         self._populate_stagger_combo(self.dow_stagger_mode)
-        self.dow_stagger_mode.setToolTip("Controls whether matching decks are offset from each other and how those offsets are chosen.")
+        self.dow_stagger_mode.setToolTip("Controls whether matching decks are offset from each other.")
         self.dow_stagger_seed = QLineEdit()
         self.dow_stagger_seed.setEnabled(False)
-        self.dow_stagger_seed.setPlaceholderText("Optional: change the hashed arrangement")
+        self.dow_stagger_seed.setPlaceholderText("Unused in stable mode")
 
         stagger_label = QLabel("Stagger")
         stagger_label.setToolTip("Spread decks across days so they don't all introduce cards on the same day.")
@@ -459,8 +464,8 @@ class SchedulerConfigDialog(QDialog):
         self.dow_stagger_help.setWordWrap(True)
         self.dow_stagger_help.setStyleSheet("color: palette(mid);")
         grid.addWidget(self.dow_stagger_help, len(VALID_DAYS) + 1, 0, 1, 2)
-        self.dow_stagger_seed_label = QLabel("Hash seed")
-        self.dow_stagger_seed_label.setToolTip("Optional: change which decks land on which days when using Hashed.")
+        self.dow_stagger_seed_label = QLabel("Advanced seed")
+        self.dow_stagger_seed_label.setToolTip("No longer used.")
         self._set_seed_controls_visible(
             self.dow_stagger_seed_label, self.dow_stagger_seed, False
         )
@@ -497,11 +502,11 @@ class SchedulerConfigDialog(QDialog):
         self.leaf_only_check.setChecked(True)
         self.m_spin.setValue(1)
         self.n_spin.setValue(3)
-        self._set_stagger_mode(self.stagger_mode, "balanced")
+        self._set_stagger_mode(self.stagger_mode, "stable")
         self.stagger_seed.setText("")
         for day in VALID_DAYS:
             self.dow_spins[day].setValue(0)
-        self._set_stagger_mode(self.dow_stagger_mode, "balanced")
+        self._set_stagger_mode(self.dow_stagger_mode, "stable")
         self.dow_stagger_seed.setText("")
         self.target_list.clear()
         self.target_summary.setText("No targets yet.")
@@ -577,19 +582,15 @@ class SchedulerConfigDialog(QDialog):
                 )
                 self._update_stagger_help(self.dow_stagger_help, "none")
             return
-        mode = stagger.get("mode", "balanced")
-        if mode not in {"balanced", "hash"}:
-            mode = "balanced"
+        mode = "stable" if stagger.get("mode") in {"stable", "balanced", "hash"} else "none"
         self._set_stagger_mode(mode_combo, mode)
-        seed_edit.setText(str(stagger.get("seed", "")))
+        seed_edit.setText("")
         if seed_edit is self.stagger_seed:
-            self._set_seed_controls_visible(
-                self.stagger_seed_label, self.stagger_seed, mode == "hash"
-            )
+            self._set_seed_controls_visible(self.stagger_seed_label, self.stagger_seed, False)
             self._update_stagger_help(self.stagger_help, mode)
         if seed_edit is self.dow_stagger_seed:
             self._set_seed_controls_visible(
-                self.dow_stagger_seed_label, self.dow_stagger_seed, mode == "hash"
+                self.dow_stagger_seed_label, self.dow_stagger_seed, False
             )
             self._update_stagger_help(self.dow_stagger_help, mode)
         self._sync_rule_stack_height()
@@ -612,6 +613,8 @@ class SchedulerConfigDialog(QDialog):
             "targets": targets,
             "leaf_only": self.leaf_only_check.isChecked(),
         }
+        if isinstance(sched.get("stagger_state"), dict):
+            updated["stagger_state"] = dict(sched["stagger_state"])
 
         if sched_type == "every_n_days":
             updated["m"] = int(self.m_spin.value())
@@ -638,12 +641,7 @@ class SchedulerConfigDialog(QDialog):
         if mode == "none":
             sched.pop("stagger", None)
             return
-        stagger = {"mode": mode}
-        if mode == "hash":
-            seed = seed_edit.text().strip()
-            if seed:
-                stagger["seed"] = seed
-        sched["stagger"] = stagger
+        sched["stagger"] = {"mode": "stable"}
 
     def _add_schedule(self) -> None:
         if self._current_uid is not None:
@@ -659,7 +657,7 @@ class SchedulerConfigDialog(QDialog):
             "n": 3,
             "targets": [],
             "leaf_only": True,
-            "stagger": {"mode": "balanced"},
+            "stagger": {"mode": "stable"},
         }
         schedules.append(sched)
         self.config["schedules"] = schedules
@@ -690,7 +688,7 @@ class SchedulerConfigDialog(QDialog):
             "type": base.get("type", "every_n_days"),
             "targets": list(base.get("targets", [])),
             "leaf_only": bool(base.get("leaf_only", True)),
-            "stagger": dict(base.get("stagger", {})) if base.get("stagger") else {"mode": "balanced"},
+            "stagger": dict(base.get("stagger", {})) if base.get("stagger") else {"mode": "stable"},
         }
         if copied["type"] == "every_n_days":
             copied["m"] = int(base.get("m", 1))
@@ -883,18 +881,14 @@ class SchedulerConfigDialog(QDialog):
 
     def _on_stagger_mode_changed(self) -> None:
         mode = self._stagger_mode_value(self.stagger_mode)
-        self._set_seed_controls_visible(
-            self.stagger_seed_label, self.stagger_seed, mode == "hash"
-        )
+        self._set_seed_controls_visible(self.stagger_seed_label, self.stagger_seed, False)
         self._update_stagger_help(self.stagger_help, mode)
         self._sync_rule_stack_height()
         self._refresh_preview()
 
     def _on_dow_stagger_mode_changed(self) -> None:
         mode = self._stagger_mode_value(self.dow_stagger_mode)
-        self._set_seed_controls_visible(
-            self.dow_stagger_seed_label, self.dow_stagger_seed, mode == "hash"
-        )
+        self._set_seed_controls_visible(self.dow_stagger_seed_label, self.dow_stagger_seed, False)
         self._update_stagger_help(self.dow_stagger_help, mode)
         self._sync_rule_stack_height()
         self._refresh_preview()
@@ -905,7 +899,7 @@ class SchedulerConfigDialog(QDialog):
 
     def _stagger_mode_value(self, combo: QComboBox) -> str:
         value = combo.currentData()
-        return str(value) if value else "balanced"
+        return str(value) if value else "stable"
 
     def _set_stagger_mode(self, combo: QComboBox, mode: str) -> None:
         idx = combo.findData(mode)
@@ -1185,19 +1179,7 @@ class SchedulerConfigDialog(QDialog):
     def _persist_config(self) -> None:
         if mw is None:
             return
-        schedules = []
-        for sched in self.config.get("schedules", []):
-            persisted = _copy_schedule(sched)
-            persisted.pop("_uid", None)
-            schedules.append(persisted)
-        mw.addonManager.writeConfig(
-            self.module,
-            {
-                "epoch": self.config.get("epoch", DEFAULT_CONFIG["epoch"]),
-                "schedules": schedules,
-                "defaults": dict(self.config.get("defaults", DEFAULT_CONFIG["defaults"])),
-            },
-        )
+        mw.addonManager.writeConfig(self.module, config_to_dict(self.config))
 
 
 def _all_deck_names() -> List[str]:
