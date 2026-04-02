@@ -243,7 +243,7 @@ class SchedulerConfigDialog(QDialog):
         self.target_list.setMinimumHeight(80)
         self.target_list.setMaximumHeight(110)
         self.target_help = QLabel(
-            "Use exact deck names or wildcard prefixes like Deck::Subdeck*."
+            "Pick deck adds an exact target immediately. Use Add wildcard... or type patterns like Deck::Subdeck*."
         )
         self.target_help.setWordWrap(True)
         self.target_help.setStyleSheet("color: palette(mid);")
@@ -258,13 +258,16 @@ class SchedulerConfigDialog(QDialog):
         self.target_input = QLineEdit()
         self.target_input.setPlaceholderText("Deck::Subdeck or Deck::*")
         self.target_pick = QPushButton("Pick deck...")
+        self.target_pick_wildcard = QPushButton("Add wildcard...")
         self.target_add = QPushButton("Add target")
         self.target_remove = QPushButton("Remove selected")
         self.target_pick.clicked.connect(self._pick_target)
+        self.target_pick_wildcard.clicked.connect(self._pick_wildcard_target)
         self.target_add.clicked.connect(self._add_target)
         self.target_remove.clicked.connect(self._remove_target)
         target_add_row.addWidget(self.target_input, 1)
         target_add_row.addWidget(self.target_pick)
+        target_add_row.addWidget(self.target_pick_wildcard)
         target_add_row.addWidget(self.target_add)
         target_layout.addLayout(target_add_row)
         target_layout.addWidget(self.target_remove)
@@ -769,9 +772,8 @@ class SchedulerConfigDialog(QDialog):
         text = self.target_input.text().strip()
         if not text:
             return
-        self.target_list.addItem(QListWidgetItem(text))
+        self._append_target(text)
         self.target_input.setText("")
-        self._refresh_preview()
 
     def _pick_target(self) -> None:
         dialog = DeckPickerDialog(parent=self)
@@ -780,13 +782,36 @@ class SchedulerConfigDialog(QDialog):
         selection = dialog.selected_deck()
         if not selection:
             return
-        self.target_input.setText(selection)
+        self._append_target(selection)
+
+    def _pick_wildcard_target(self) -> None:
+        dialog = DeckPickerDialog(parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        selection = dialog.selected_deck()
+        if not selection:
+            return
+        self._append_target(f"{selection}*")
 
     def _remove_target(self) -> None:
         row = self.target_list.currentRow()
         if row < 0:
             return
         self.target_list.takeItem(row)
+        self._refresh_preview()
+
+    def _append_target(self, text: str) -> None:
+        normalized = text.strip()
+        if not normalized:
+            return
+        for row in range(self.target_list.count()):
+            item = self.target_list.item(row)
+            if item is not None and item.text() == normalized:
+                self.target_list.setCurrentRow(row)
+                self._refresh_preview()
+                return
+        self.target_list.addItem(QListWidgetItem(normalized))
+        self.target_list.setCurrentRow(self.target_list.count() - 1)
         self._refresh_preview()
 
     def _rebalance_current_schedule(self) -> None:
@@ -890,6 +915,7 @@ class SchedulerConfigDialog(QDialog):
             self.dow_stagger_seed,
             self.target_input,
             self.target_pick,
+            self.target_pick_wildcard,
             self.target_add,
             self.target_remove,
             self.target_list,
@@ -900,6 +926,7 @@ class SchedulerConfigDialog(QDialog):
         self.btn_copy.setAutoDefault(False)
         self.btn_remove.setAutoDefault(False)
         self.target_pick.setAutoDefault(False)
+        self.target_pick_wildcard.setAutoDefault(False)
         self.target_add.setAutoDefault(False)
         self.target_remove.setAutoDefault(False)
         self.btn_copy.setEnabled(enabled and self.schedule_list.currentRow() >= 0)
