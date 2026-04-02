@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Optional
 
 from aqt import mw
 from aqt.qt import (
-    QAction,
     QBrush,
     QCheckBox,
     QColor,
@@ -418,10 +417,6 @@ class SchedulerConfigDialog(QDialog):
         self.stagger_mode = QComboBox()
         self._populate_stagger_combo(self.stagger_mode)
 
-        self.stagger_seed = QLineEdit()
-        self.stagger_seed.setEnabled(False)
-        self.stagger_seed.setPlaceholderText("Unused in stable mode")
-
         m_label = QLabel("Cards per cycle")
         m_label.setToolTip("How many new cards to introduce per cycle.")
         n_label = QLabel("Cycle length (days)")
@@ -434,21 +429,14 @@ class SchedulerConfigDialog(QDialog):
         self.stagger_help = QLabel()
         self.stagger_help.setWordWrap(True)
         self.stagger_help.setStyleSheet("color: palette(mid);")
-        self.stagger_seed_label = QLabel("Advanced seed")
-        self.stagger_seed_label.setToolTip("No longer used.")
-        self._set_seed_controls_visible(
-            self.stagger_seed_label, self.stagger_seed, False
-        )
         layout.addRow(stagger_label, self.stagger_mode)
         layout.addRow("", self.stagger_help)
-        layout.addRow(self.stagger_seed_label, self.stagger_seed)
 
         self.m_spin.editingFinished.connect(self._refresh_preview)
         self.n_spin.editingFinished.connect(self._refresh_preview)
         self.m_spin.valueChanged.connect(self._on_numeric_value_changed)
         self.n_spin.valueChanged.connect(self._on_numeric_value_changed)
         self.stagger_mode.currentIndexChanged.connect(self._on_stagger_mode_changed)
-        self.stagger_seed.editingFinished.connect(self._refresh_preview)
 
         return w
 
@@ -475,9 +463,6 @@ class SchedulerConfigDialog(QDialog):
         self.dow_stagger_mode = QComboBox()
         self._populate_stagger_combo(self.dow_stagger_mode)
         self.dow_stagger_mode.setToolTip("Controls whether matching decks are offset from each other.")
-        self.dow_stagger_seed = QLineEdit()
-        self.dow_stagger_seed.setEnabled(False)
-        self.dow_stagger_seed.setPlaceholderText("Unused in stable mode")
 
         stagger_label = QLabel("Stagger")
         stagger_label.setToolTip("Spread decks across days so they don't all introduce cards on the same day.")
@@ -487,16 +472,8 @@ class SchedulerConfigDialog(QDialog):
         self.dow_stagger_help.setWordWrap(True)
         self.dow_stagger_help.setStyleSheet("color: palette(mid);")
         grid.addWidget(self.dow_stagger_help, len(VALID_DAYS) + 1, 0, 1, 2)
-        self.dow_stagger_seed_label = QLabel("Advanced seed")
-        self.dow_stagger_seed_label.setToolTip("No longer used.")
-        self._set_seed_controls_visible(
-            self.dow_stagger_seed_label, self.dow_stagger_seed, False
-        )
-        grid.addWidget(self.dow_stagger_seed_label, len(VALID_DAYS) + 2, 0)
-        grid.addWidget(self.dow_stagger_seed, len(VALID_DAYS) + 2, 1)
 
         self.dow_stagger_mode.currentIndexChanged.connect(self._on_dow_stagger_mode_changed)
-        self.dow_stagger_seed.editingFinished.connect(self._refresh_preview)
 
         return w
 
@@ -526,11 +503,9 @@ class SchedulerConfigDialog(QDialog):
         self.m_spin.setValue(1)
         self.n_spin.setValue(3)
         self._set_stagger_mode(self.stagger_mode, "stable")
-        self.stagger_seed.setText("")
         for day in VALID_DAYS:
             self.dow_spins[day].setValue(0)
         self._set_stagger_mode(self.dow_stagger_mode, "stable")
-        self.dow_stagger_seed.setText("")
         self.target_list.clear()
         self.target_summary.setText("No targets yet.")
         self._clear_preview_table()
@@ -575,12 +550,12 @@ class SchedulerConfigDialog(QDialog):
         if sched_type == "every_n_days":
             self.m_spin.setValue(int(sched.get("m", 1)))
             self.n_spin.setValue(int(sched.get("n", 3)))
-            self._load_stagger(sched, self.stagger_mode, self.stagger_seed)
+            self._load_stagger(sched, self.stagger_mode, self.stagger_help)
         else:
             by_day = sched.get("by_day") or {}
             for day in VALID_DAYS:
                 self.dow_spins[day].setValue(int(by_day.get(day, 0) or 0))
-            self._load_stagger(sched, self.dow_stagger_mode, self.dow_stagger_seed)
+            self._load_stagger(sched, self.dow_stagger_mode, self.dow_stagger_help)
 
         self.target_list.clear()
         for t in sched.get("targets", []) or []:
@@ -589,33 +564,15 @@ class SchedulerConfigDialog(QDialog):
         self._building = False
         self._refresh_preview()
 
-    def _load_stagger(self, sched: Dict[str, Any], mode_combo: QComboBox, seed_edit: QLineEdit) -> None:
+    def _load_stagger(self, sched: Dict[str, Any], mode_combo: QComboBox, help_label: QLabel) -> None:
         stagger = sched.get("stagger")
         if not stagger:
             self._set_stagger_mode(mode_combo, "none")
-            seed_edit.setText("")
-            if seed_edit is self.stagger_seed:
-                self._set_seed_controls_visible(
-                    self.stagger_seed_label, self.stagger_seed, False
-                )
-                self._update_stagger_help(self.stagger_help, "none")
-            if seed_edit is self.dow_stagger_seed:
-                self._set_seed_controls_visible(
-                    self.dow_stagger_seed_label, self.dow_stagger_seed, False
-                )
-                self._update_stagger_help(self.dow_stagger_help, "none")
+            self._update_stagger_help(help_label, "none")
             return
         mode = "stable" if stagger.get("mode") in {"stable", "balanced", "hash"} else "none"
         self._set_stagger_mode(mode_combo, mode)
-        seed_edit.setText("")
-        if seed_edit is self.stagger_seed:
-            self._set_seed_controls_visible(self.stagger_seed_label, self.stagger_seed, False)
-            self._update_stagger_help(self.stagger_help, mode)
-        if seed_edit is self.dow_stagger_seed:
-            self._set_seed_controls_visible(
-                self.dow_stagger_seed_label, self.dow_stagger_seed, False
-            )
-            self._update_stagger_help(self.dow_stagger_help, mode)
+        self._update_stagger_help(help_label, mode)
         self._sync_rule_stack_height()
 
     def _commit_current(self) -> None:
@@ -642,10 +599,10 @@ class SchedulerConfigDialog(QDialog):
         if sched_type == "every_n_days":
             updated["m"] = int(self.m_spin.value())
             updated["n"] = int(self.n_spin.value())
-            self._store_stagger(updated, self.stagger_mode, self.stagger_seed)
+            self._store_stagger(updated, self.stagger_mode)
         else:
             updated["by_day"] = {day: int(self.dow_spins[day].value()) for day in VALID_DAYS}
-            self._store_stagger(updated, self.dow_stagger_mode, self.dow_stagger_seed)
+            self._store_stagger(updated, self.dow_stagger_mode)
 
         schedules = self.config.get("schedules", [])
         for idx, existing in enumerate(schedules):
@@ -659,7 +616,7 @@ class SchedulerConfigDialog(QDialog):
             item.setText(updated["id"])
             item.setData(Qt.ItemDataRole.UserRole, updated["_uid"])
 
-    def _store_stagger(self, sched: Dict[str, Any], mode_combo: QComboBox, seed_edit: QLineEdit) -> None:
+    def _store_stagger(self, sched: Dict[str, Any], mode_combo: QComboBox) -> None:
         mode = self._stagger_mode_value(mode_combo)
         if mode == "none":
             sched.pop("stagger", None)
@@ -910,9 +867,7 @@ class SchedulerConfigDialog(QDialog):
             self.m_spin,
             self.n_spin,
             self.stagger_mode,
-            self.stagger_seed,
             self.dow_stagger_mode,
-            self.dow_stagger_seed,
             self.target_input,
             self.target_pick,
             self.target_pick_wildcard,
@@ -930,24 +885,15 @@ class SchedulerConfigDialog(QDialog):
         self.target_add.setAutoDefault(False)
         self.target_remove.setAutoDefault(False)
         self.btn_copy.setEnabled(enabled and self.schedule_list.currentRow() >= 0)
-        if not enabled:
-            self._set_seed_controls_visible(
-                self.stagger_seed_label, self.stagger_seed, False
-            )
-            self._set_seed_controls_visible(
-                self.dow_stagger_seed_label, self.dow_stagger_seed, False
-            )
 
     def _on_stagger_mode_changed(self) -> None:
         mode = self._stagger_mode_value(self.stagger_mode)
-        self._set_seed_controls_visible(self.stagger_seed_label, self.stagger_seed, False)
         self._update_stagger_help(self.stagger_help, mode)
         self._sync_rule_stack_height()
         self._refresh_preview()
 
     def _on_dow_stagger_mode_changed(self) -> None:
         mode = self._stagger_mode_value(self.dow_stagger_mode)
-        self._set_seed_controls_visible(self.dow_stagger_seed_label, self.dow_stagger_seed, False)
         self._update_stagger_help(self.dow_stagger_help, mode)
         self._sync_rule_stack_height()
         self._refresh_preview()
@@ -1135,13 +1081,6 @@ class SchedulerConfigDialog(QDialog):
             font.setBold(True)
             item.setFont(font)
         self.preview_table.setItem(row, column, item)
-
-    def _set_seed_controls_visible(
-        self, label: QLabel, field: QLineEdit, visible: bool
-    ) -> None:
-        label.setVisible(visible)
-        field.setVisible(visible)
-        field.setEnabled(visible)
 
     def _sync_rule_stack_height(self) -> None:
         current = self.stack.currentWidget()

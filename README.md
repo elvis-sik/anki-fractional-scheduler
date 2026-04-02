@@ -17,11 +17,13 @@ An Anki add-on to schedule fractional new cards per deck or deck groups, e.g. "1
 - `Every N Days` schedules such as 1 card every 3 days.
 - Day-of-week schedules with separate values for Mon-Sun.
 - Multiple deck targets per schedule using exact names or wildcard prefixes.
+- `Pick deck...` adds exact targets immediately, and `Add wildcard...` adds wildcard targets from the deck picker.
 - Optional staggering across matched decks: stable balanced or off.
 - Leaf-only matching so container decks do not receive limits.
 - Filtered decks are skipped.
 - Automatic apply on profile open, collection open, and optionally sync, with an at-most-once-per-day guard.
 - Preview table for the next 14 days, including daily totals, persistent column widths, and grouping by identical schedules.
+- `Rebalance Offsets` recomputes stable stagger assignments for the currently matched decks in a schedule.
 - Immediate manual apply action from the Tools menu.
 - Read-only API for other add-ons via `mw.fractional_scheduler_api`.
 
@@ -89,4 +91,5 @@ The service only includes matched, non-dynamic decks that survive `leaf_only` fi
 ## Notes
 - If you use a non-midnight Anki day rollover, the epoch calculation respects the rollover hour.
 - The config dialog autosaves; there is no separate Save button.
+- `Rebalance Offsets` updates stored stagger assignments and preview data; deck limits change on the next apply.
 - `addon/meta.json` is local Anki state and is intentionally not tracked in git.
