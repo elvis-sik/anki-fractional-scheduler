@@ -12,6 +12,8 @@ except Exception:  # pragma: no cover - when imported outside Anki
 
 VALID_TYPES = {"every_n_days", "dow"}
 VALID_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+DEFAULT_FRACTIONAL_STRATEGY = "fraction_first"
+VALID_FRACTIONAL_STRATEGIES = {"hash", "fraction_first", "balance_first"}
 DEFAULT_NOTIFY_DESCENDANT_MODE = "direct_only"
 VALID_NOTIFY_DESCENDANT_MODES = {
     DEFAULT_NOTIFY_DESCENDANT_MODE,
@@ -47,7 +49,7 @@ DEFAULT_CONFIG = {
 }
 
 
-VALID_STAGGER_MODES = {"stable", "balanced", "hash"}
+VALID_STAGGER_MODES = {"stable"}
 
 
 def _log(level: str, message: str) -> None:
@@ -143,6 +145,7 @@ def normalize_config(raw: Dict[str, Any]) -> AddonConfig:
                 continue
             normalized["m"] = m
             normalized["n"] = n
+            normalized["fractional_strategy"] = _normalize_fractional_strategy(sched)
         else:
             by_day = sched.get("by_day") or {}
             if not isinstance(by_day, dict):
@@ -181,6 +184,19 @@ def _normalize_notify_descendant_mode(value: Any) -> str:
     if mode not in VALID_NOTIFY_DESCENDANT_MODES:
         return DEFAULT_NOTIFY_DESCENDANT_MODE
     return mode
+
+
+def _normalize_fractional_strategy(sched: Dict[str, Any]) -> str:
+    explicit = str(sched.get("fractional_strategy") or "")
+    if explicit in VALID_FRACTIONAL_STRATEGIES:
+        return explicit
+
+    stagger = sched.get("stagger")
+    legacy_mode = str(stagger.get("mode") or "") if isinstance(stagger, dict) else ""
+    if legacy_mode == "hash":
+        return "hash"
+
+    return DEFAULT_FRACTIONAL_STRATEGY
 
 
 
@@ -233,6 +249,7 @@ def _schedule_to_dict(sched: Dict[str, Any]) -> Dict[str, Any]:
     if persisted["type"] == "every_n_days":
         persisted["m"] = int(sched.get("m", 1))
         persisted["n"] = int(sched.get("n", 3))
+        persisted["fractional_strategy"] = _normalize_fractional_strategy(sched)
     else:
         persisted["by_day"] = dict(sched.get("by_day", {}) or {})
 

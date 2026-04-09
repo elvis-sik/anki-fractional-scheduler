@@ -59,6 +59,16 @@ TYPE_DESCRIPTIONS = {
     "every_n_days": "Introduce new cards on a repeating cycle, such as 1 card every 3 days.",
     "dow": "Set a separate new-card limit for each weekday.",
 }
+FRACTIONAL_STRATEGY_OPTIONS = [
+    ("Balance first", "balance_first"),
+    ("Fraction first", "fraction_first"),
+    ("Hash spread", "hash"),
+]
+FRACTIONAL_STRATEGY_DESCRIPTIONS = {
+    "balance_first": "Use a rotating deck queue and a shared daily budget so missed decks keep their place without creating catch-up spikes.",
+    "fraction_first": "Keep each deck eligible as soon as its own cadence says it is due, even if that creates bunching after missed days.",
+    "hash": "Use a deterministic static spread based on deck identity, without history-sensitive catch-up or queue repair.",
+}
 NOTIFY_MODE_OPTIONS = [
     ("This row only", "direct_only"),
     ("Any blocked descendant", "any_blocked_descendant"),
@@ -91,6 +101,9 @@ def _copy_schedule(sched: Dict[str, Any]) -> Dict[str, Any]:
     if copied["type"] == "every_n_days":
         copied["m"] = int(sched.get("m", 1))
         copied["n"] = int(sched.get("n", 3))
+        copied["fractional_strategy"] = str(
+            sched.get("fractional_strategy", "fraction_first")
+        )
     else:
         copied["by_day"] = dict(sched.get("by_day", {}) or {})
 
@@ -459,26 +472,39 @@ class SchedulerConfigDialog(QDialog):
 
         self.stagger_mode = QComboBox()
         self._populate_stagger_combo(self.stagger_mode)
+        self.fractional_strategy_combo = QComboBox()
+        self._populate_fractional_strategy_combo(self.fractional_strategy_combo)
 
         m_label = QLabel("Cards per cycle")
         m_label.setToolTip("How many new cards to introduce per cycle.")
         n_label = QLabel("Cycle length (days)")
         n_label.setToolTip("Length of the cycle in days. The cards are spread evenly across this cycle.")
+        strategy_label = QLabel("Strategy")
+        strategy_label.setToolTip("Controls how grouped decks react when some scheduled introductions are missed.")
+        self.fractional_strategy_combo.setToolTip("Choose whether this schedule prioritizes cadence, balance, or a static hash-based spread.")
+        self.fractional_strategy_help = QLabel()
+        self.fractional_strategy_help.setWordWrap(True)
+        self.fractional_strategy_help.setStyleSheet("color: palette(mid);")
         layout.addRow(m_label, self.m_spin)
         layout.addRow(n_label, self.n_spin)
-        stagger_label = QLabel("Stagger")
-        stagger_label.setToolTip("Spread decks across days so they don't all introduce cards on the same day.")
+        layout.addRow(strategy_label, self.fractional_strategy_combo)
+        layout.addRow("", self.fractional_strategy_help)
+        self.every_stagger_label = QLabel("Stagger")
+        self.every_stagger_label.setToolTip("Spread decks across days so they don't all introduce cards on the same day.")
         self.stagger_mode.setToolTip("Controls whether matching decks are offset from each other.")
         self.stagger_help = QLabel()
         self.stagger_help.setWordWrap(True)
         self.stagger_help.setStyleSheet("color: palette(mid);")
-        layout.addRow(stagger_label, self.stagger_mode)
+        layout.addRow(self.every_stagger_label, self.stagger_mode)
         layout.addRow("", self.stagger_help)
 
         self.m_spin.editingFinished.connect(self._refresh_preview)
         self.n_spin.editingFinished.connect(self._refresh_preview)
         self.m_spin.valueChanged.connect(self._on_numeric_value_changed)
         self.n_spin.valueChanged.connect(self._on_numeric_value_changed)
+        self.fractional_strategy_combo.currentIndexChanged.connect(
+            self._on_fractional_strategy_changed
+        )
         self.stagger_mode.currentIndexChanged.connect(self._on_stagger_mode_changed)
 
         return w
@@ -545,6 +571,7 @@ class SchedulerConfigDialog(QDialog):
         self.leaf_only_check.setChecked(True)
         self.m_spin.setValue(1)
         self.n_spin.setValue(3)
+        self._set_fractional_strategy("balance_first")
         self._set_stagger_mode(self.stagger_mode, "stable")
         for day in VALID_DAYS:
             self.dow_spins[day].setValue(0)
@@ -596,6 +623,7 @@ class SchedulerConfigDialog(QDialog):
         if sched_type == "every_n_days":
             self.m_spin.setValue(int(sched.get("m", 1)))
             self.n_spin.setValue(int(sched.get("n", 3)))
+            self._set_fractional_strategy(str(sched.get("fractional_strategy", "fraction_first")))
             self._load_stagger(sched, self.stagger_mode, self.stagger_help)
         else:
             by_day = sched.get("by_day") or {}
@@ -609,6 +637,7 @@ class SchedulerConfigDialog(QDialog):
 
         self._building = False
         self._refresh_feature_controls()
+        self._refresh_strategy_controls()
         self._refresh_preview()
 
     def _load_stagger(self, sched: Dict[str, Any], mode_combo: QComboBox, help_label: QLabel) -> None:
@@ -649,6 +678,7 @@ class SchedulerConfigDialog(QDialog):
         if sched_type == "every_n_days":
             updated["m"] = int(self.m_spin.value())
             updated["n"] = int(self.n_spin.value())
+            updated["fractional_strategy"] = self._fractional_strategy_value()
             self._store_stagger(updated, self.stagger_mode)
         else:
             updated["by_day"] = {day: int(self.dow_spins[day].value()) for day in VALID_DAYS}
@@ -685,6 +715,7 @@ class SchedulerConfigDialog(QDialog):
             "type": "every_n_days",
             "m": 1,
             "n": 3,
+            "fractional_strategy": "balance_first",
             "targets": [],
             "leaf_only": True,
             "fractional_enabled": True,
@@ -731,6 +762,9 @@ class SchedulerConfigDialog(QDialog):
         if copied["type"] == "every_n_days":
             copied["m"] = int(base.get("m", 1))
             copied["n"] = int(base.get("n", 3))
+            copied["fractional_strategy"] = str(
+                base.get("fractional_strategy", "fraction_first")
+            )
         else:
             copied["by_day"] = dict(base.get("by_day", {}))
 
@@ -944,6 +978,7 @@ class SchedulerConfigDialog(QDialog):
             self.notify_mode_combo,
             self.m_spin,
             self.n_spin,
+            self.fractional_strategy_combo,
             self.stagger_mode,
             self.dow_stagger_mode,
             self.target_input,
@@ -970,6 +1005,13 @@ class SchedulerConfigDialog(QDialog):
         self._sync_rule_stack_height()
         self._refresh_preview()
 
+    def _on_fractional_strategy_changed(self) -> None:
+        mode = self._fractional_strategy_value()
+        self._update_fractional_strategy_help(mode)
+        self._refresh_strategy_controls()
+        self._sync_rule_stack_height()
+        self._refresh_preview()
+
     def _on_dow_stagger_mode_changed(self) -> None:
         mode = self._stagger_mode_value(self.dow_stagger_mode)
         self._update_stagger_help(self.dow_stagger_help, mode)
@@ -980,6 +1022,10 @@ class SchedulerConfigDialog(QDialog):
         for label, value in STAGGER_OPTIONS:
             combo.addItem(label, value)
 
+    def _populate_fractional_strategy_combo(self, combo: QComboBox) -> None:
+        for label, value in FRACTIONAL_STRATEGY_OPTIONS:
+            combo.addItem(label, value)
+
     def _stagger_mode_value(self, combo: QComboBox) -> str:
         value = combo.currentData()
         return str(value) if value else "stable"
@@ -988,8 +1034,33 @@ class SchedulerConfigDialog(QDialog):
         idx = combo.findData(mode)
         combo.setCurrentIndex(idx if idx >= 0 else 0)
 
+    def _fractional_strategy_value(self) -> str:
+        value = self.fractional_strategy_combo.currentData()
+        return str(value) if value else "balance_first"
+
+    def _set_fractional_strategy(self, strategy: str) -> None:
+        idx = self.fractional_strategy_combo.findData(strategy)
+        self.fractional_strategy_combo.setCurrentIndex(idx if idx >= 0 else 0)
+
     def _update_stagger_help(self, label: QLabel, mode: str) -> None:
         label.setText(STAGGER_DESCRIPTIONS.get(mode, ""))
+
+    def _update_fractional_strategy_help(self, strategy: str) -> None:
+        self.fractional_strategy_help.setText(
+            FRACTIONAL_STRATEGY_DESCRIPTIONS.get(strategy, "")
+        )
+
+    def _refresh_strategy_controls(self) -> None:
+        strategy = self._fractional_strategy_value()
+        every_uses_stagger = strategy == "fraction_first"
+        every_enabled = self.type_combo.currentIndex() == 0 and self.type_combo.isEnabled()
+        self.every_stagger_label.setEnabled(every_enabled and every_uses_stagger)
+        self.stagger_mode.setEnabled(every_enabled and every_uses_stagger)
+        if not every_uses_stagger:
+            self.stagger_help.setText("This strategy does not use per-deck stagger offsets.")
+        else:
+            self._update_stagger_help(self.stagger_help, self._stagger_mode_value(self.stagger_mode))
+        self._update_fractional_strategy_help(strategy)
 
     def _update_type_help(self) -> None:
         sched_type = "every_n_days" if self.type_combo.currentIndex() == 0 else "dow"
@@ -1017,6 +1088,7 @@ class SchedulerConfigDialog(QDialog):
         )
         self.leaf_only_help.setEnabled(fractional_enabled)
         self._update_notify_mode_help()
+        self._refresh_strategy_controls()
 
     def _clear_preview_table(self) -> None:
         self.preview_table.clear()
