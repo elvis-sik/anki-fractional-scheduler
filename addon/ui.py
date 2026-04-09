@@ -210,11 +210,11 @@ class SchedulerConfigDialog(QDialog):
         action_row = QHBoxLayout()
         self.rebalance_btn = QPushButton("Rebalance Offsets")
         self.rebalance_btn.setToolTip(
-            "Recompute stable stagger offsets for the selected schedule using the decks that match right now."
+            "Recompute stable stagger offsets for schedules that use stable offset balancing."
         )
         self.rebalance_btn.clicked.connect(self._rebalance_current_schedule)
         self.rebalance_help = QLabel(
-            "Useful after deck additions or moves. This updates the preview only; apply limits separately."
+            "Useful for stable offset schedules after deck additions or moves. This updates the preview only; apply limits separately."
         )
         self.rebalance_help.setWordWrap(True)
         self.rebalance_help.setStyleSheet("color: palette(mid);")
@@ -646,7 +646,7 @@ class SchedulerConfigDialog(QDialog):
             self._set_stagger_mode(mode_combo, "none")
             self._update_stagger_help(help_label, "none")
             return
-        mode = "stable" if stagger.get("mode") in {"stable", "balanced", "hash"} else "none"
+        mode = "stable" if stagger.get("mode") == "stable" else "none"
         self._set_stagger_mode(mode_combo, mode)
         self._update_stagger_help(help_label, mode)
         self._sync_rule_stack_height()
@@ -870,6 +870,10 @@ class SchedulerConfigDialog(QDialog):
         sched = self._current_schedule()
         if sched is None:
             return
+        if sched.get("type") == "every_n_days" and str(
+            sched.get("fractional_strategy", "fraction_first")
+        ) != "fraction_first":
+            return
         rebalance_schedule_offsets(mw.col, sched)
         self._persist_config()
         self._refresh_preview()
@@ -1061,6 +1065,12 @@ class SchedulerConfigDialog(QDialog):
         else:
             self._update_stagger_help(self.stagger_help, self._stagger_mode_value(self.stagger_mode))
         self._update_fractional_strategy_help(strategy)
+        rebalance_enabled = False
+        if self.type_combo.currentIndex() == 0:
+            rebalance_enabled = every_enabled and every_uses_stagger and self._stagger_mode_value(self.stagger_mode) != "none"
+        elif self.type_combo.currentIndex() == 1:
+            rebalance_enabled = self.type_combo.isEnabled() and self._stagger_mode_value(self.dow_stagger_mode) != "none"
+        self.rebalance_btn.setEnabled(rebalance_enabled)
 
     def _update_type_help(self) -> None:
         sched_type = "every_n_days" if self.type_combo.currentIndex() == 0 else "dow"

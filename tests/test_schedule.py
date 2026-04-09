@@ -15,6 +15,24 @@ def deck(deck_id: int, name: str) -> schedule.DeckInfo:
     return schedule.DeckInfo(deck_id=deck_id, name=name)
 
 
+class FakeBalanceCol:
+    def __init__(self) -> None:
+        self.conf = {"rollover": 4}
+        self.db = self
+        self.sched = type("Sched", (), {"today": 10})()
+        self.decks = self
+        self._decks = [deck(1, "A"), deck(2, "B"), deck(3, "C"), deck(4, "D")]
+
+    def all(self, _sql: str, *_args):
+        return []
+
+    def all_names_and_ids(self):
+        return [{"name": item.name, "id": item.deck_id} for item in self._decks]
+
+    def get(self, deck_id: int):
+        return {"id": deck_id, "name": next(item.name for item in self._decks if item.deck_id == deck_id), "dyn": False}
+
+
 class ShiftedEveryNDaysIndexTests(unittest.TestCase):
     def test_skipped_positive_day_shifts_next_release_forward(self) -> None:
         sched = {"type": "every_n_days", "m": 1, "n": 7}
@@ -66,7 +84,7 @@ class ShiftedEveryNDaysIndexTests(unittest.TestCase):
             1,
         )
 
-    def test_no_history_keeps_calendar_anchor(self) -> None:
+    def test_no_history_keeps_first_scheduled_release_pending(self) -> None:
         sched = {"type": "every_n_days", "m": 1, "n": 7}
         decks = [deck(1, "Deck")]
 
@@ -78,7 +96,29 @@ class ShiftedEveryNDaysIndexTests(unittest.TestCase):
             introduced_day_indices=set(),
         )
 
-        self.assertEqual(effective_day_index, 30)
+        self.assertEqual(effective_day_index, 0)
+        self.assertEqual(
+            schedule._every_n_days_limit_for_day_index(sched, decks[0], decks, effective_day_index),
+            1,
+        )
+
+    def test_missed_scheduled_day_is_still_available_the_day_after(self) -> None:
+        sched = {"type": "every_n_days", "m": 1, "n": 7}
+        decks = [deck(1, "Deck")]
+
+        effective_day_index = schedule._shifted_every_n_days_day_index(
+            raw_day_index=8,
+            schedule=sched,
+            deck=decks[0],
+            scheduled_decks=decks,
+            introduced_day_indices=set(),
+        )
+
+        self.assertEqual(effective_day_index, 0)
+        self.assertEqual(
+            schedule._every_n_days_limit_for_day_index(sched, decks[0], decks, effective_day_index),
+            1,
+        )
 
 
 class StableBalancedPhaseTests(unittest.TestCase):
@@ -164,6 +204,62 @@ class StableBalancedPhaseTests(unittest.TestCase):
             sched["stagger_state"]["assignments"],
             {"1": 0, "3": 1, "4": 2},
         )
+
+
+class DailyBudgetPatternTests(unittest.TestCase):
+    def test_distributed_counts_handles_group_budget(self) -> None:
+        self.assertEqual(schedule.distributed_counts(20, 7), [3, 3, 3, 3, 3, 3, 2])
+
+    def test_balance_first_preview_rotates_queue_by_budget(self) -> None:
+        sched = {
+            "id": "group",
+            "type": "every_n_days",
+            "m": 1,
+            "n": 2,
+            "fractional_strategy": "balance_first",
+        }
+        decks = [deck(1, "A"), deck(2, "B"), deck(3, "C"), deck(4, "D")]
+
+        preview = schedule._preview_balance_first_sequences_by_deck(
+            FakeBalanceCol(),
+            sched,
+            decks,
+            epoch="2026-01-01",
+            raw_day_index=0,
+            days=2,
+            all_decks=decks,
+        )
+
+        todays_due = {deck_id for deck_id, seq in preview.items() if seq[0] > 0}
+        tomorrows_due = {deck_id for deck_id, seq in preview.items() if seq[1] > 0}
+
+        self.assertEqual(len(todays_due), 2)
+        self.assertEqual(len(tomorrows_due), 2)
+        self.assertTrue(todays_due.isdisjoint(tomorrows_due))
+
+    def test_balance_first_replays_out_of_order_history(self) -> None:
+        queue = [1, 2, 3, 4]
+
+        queue = schedule._rotate_deck_to_back(queue, 3)
+        queue = schedule._rotate_deck_to_back(queue, 1)
+
+        self.assertEqual(queue, [2, 4, 3, 1])
+
+    def test_hash_strategy_uses_deterministic_phase(self) -> None:
+        sched = {
+            "id": "hashy",
+            "type": "every_n_days",
+            "m": 1,
+            "n": 7,
+            "fractional_strategy": "hash",
+        }
+        decks = [deck(1, "Deck")]
+
+        first = schedule._every_n_days_pattern_and_phase(sched, decks[0], decks)
+        second = schedule._every_n_days_pattern_and_phase(sched, decks[0], decks)
+
+        self.assertEqual(first, second)
+        self.assertEqual(sum(first[0]), 1)
 
 
 class FeatureAssignmentTests(unittest.TestCase):

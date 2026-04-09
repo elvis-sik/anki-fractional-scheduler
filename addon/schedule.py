@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import time
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -10,6 +11,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 VALID_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 FEATURE_FRACTIONAL = "fractional_enabled"
 FEATURE_NOTIFY = "notify_enabled"
+DEFAULT_FRACTIONAL_STRATEGY = "fraction_first"
 
 
 @dataclass(frozen=True)
@@ -35,6 +37,13 @@ class FractionalDeckHealth:
     cycle_length_days: int
     has_future_positive_limit: bool
     next_positive_day_offset: Optional[int]
+
+
+@dataclass(frozen=True)
+class IntroductionEvent:
+    day_index: int
+    timestamp_ms: int
+    deck_id: int
 
 
 def _local_tzinfo():
@@ -69,23 +78,52 @@ def anki_day_number_from_date_str(date_str: str, rollover_hours: int) -> int:
 
 
 def bresenham_pattern(m: int, n: int) -> List[int]:
+    return [int(value > 0) for value in distributed_counts(m, n)]
+
+
+def distributed_counts(total: int, n: int) -> List[int]:
     if n <= 0:
         return []
-    if m <= 0:
+    if total <= 0:
         return [0] * n
-    if m >= n:
-        return [1] * n
-
-    pattern: List[int] = []
-    acc = n - m
+    counts: List[int] = []
+    acc = n - 1
     for _ in range(n):
-        acc += m
-        if acc >= n:
-            pattern.append(1)
-            acc -= n
-        else:
-            pattern.append(0)
-    return pattern
+        acc += total
+        count = acc // n
+        counts.append(int(count))
+        acc -= count * n
+    return counts
+
+
+def _fractional_strategy(schedule: Dict[str, Any]) -> str:
+    strategy = str(schedule.get("fractional_strategy") or DEFAULT_FRACTIONAL_STRATEGY)
+    if strategy in {"hash", "fraction_first", "balance_first"}:
+        return strategy
+    return DEFAULT_FRACTIONAL_STRATEGY
+
+
+def _hash_int(value: str) -> int:
+    digest = hashlib.sha1(value.encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big", signed=False)
+
+
+def _hashed_phase(schedule: Dict[str, Any], deck: DeckInfo, modulo: int) -> int:
+    if modulo <= 0:
+        return 0
+    seed = f"{schedule.get('id', '')}\0{deck.name}\0{deck.deck_id}"
+    return _hash_int(seed) % modulo
+
+
+def _stable_deck_order(schedule: Dict[str, Any], decks: List[DeckInfo]) -> List[DeckInfo]:
+    return sorted(
+        decks,
+        key=lambda deck: (
+            _hash_int(f"{schedule.get('id', '')}\0{deck.name}\0{deck.deck_id}"),
+            deck.name.lower(),
+            deck.deck_id,
+        ),
+    )
 
 
 def match_deck_names(targets: Iterable[str], deck_names: Iterable[str]) -> List[str]:
@@ -142,26 +180,19 @@ def preview_schedule(
     weekday_idx = datetime.fromtimestamp(day_start_ts, tz=_local_tzinfo()).weekday()
     preview_decks = _decks_for_names(col, deck_names)
 
-    results: Dict[str, List[int]] = {}
-
     if schedule["type"] == "every_n_days":
-        effective_day_indices = _preview_every_n_days_day_indices(
+        sequences = _preview_every_n_days_sequences_by_deck(
             col,
             schedule,
             preview_decks,
             epoch,
             day_index,
+            days,
         )
-        for deck in preview_decks:
-            effective_day_index = effective_day_indices.get(deck.deck_id, day_index)
-            pattern, phase = _every_n_days_pattern_and_phase(schedule, deck, preview_decks)
-            seq = []
-            for i in range(days):
-                seq.append(_every_n_days_limit_from_pattern(pattern, phase, effective_day_index + i))
-            results[deck.name] = seq
-        return results
+        return {deck.name: list(sequences.get(deck.deck_id, [])) for deck in preview_decks}
 
     # day-of-week
+    results: Dict[str, List[int]] = {}
     phases = _assign_phases(schedule, preview_decks)
     by_day = schedule.get("by_day") or {}
     for deck in preview_decks:
@@ -347,14 +378,24 @@ def compute_deck_limits(col, config) -> List[DeckLimit]:
         feature_key=FEATURE_FRACTIONAL,
     )
     calendar_state = _calendar_state(col, config.epoch)
-    every_n_day_indices = _effective_every_n_days_day_indices(
-        col,
-        config.epoch,
-        decks,
-        assignments,
-        schedule_to_decks,
-        calendar_state["day_index"],
-    )
+    every_n_limits: Dict[int, int] = {}
+
+    for scheduled_decks in schedule_to_decks.values():
+        if not scheduled_decks:
+            continue
+        schedule = assignments[scheduled_decks[0].deck_id]
+        if schedule["type"] != "every_n_days":
+            continue
+        every_n_limits.update(
+            _today_every_n_days_limits_for_schedule(
+                col,
+                schedule,
+                decks,
+                scheduled_decks,
+                config.epoch,
+                calendar_state["day_index"],
+            )
+        )
 
     results: List[DeckLimit] = []
 
@@ -364,15 +405,17 @@ def compute_deck_limits(col, config) -> List[DeckLimit]:
             continue
 
         scheduled_decks = schedule_to_decks.get(str(sched["id"]), [])
-        day_index = every_n_day_indices.get(deck.deck_id, calendar_state["day_index"])
-        limit = _limit_for_offset(
-            sched,
-            deck,
-            scheduled_decks,
-            day_index,
-            calendar_state["weekday_idx"],
-            0,
-        )
+        if sched["type"] == "every_n_days":
+            limit = int(every_n_limits.get(deck.deck_id, 0))
+        else:
+            limit = _limit_for_offset(
+                sched,
+                deck,
+                scheduled_decks,
+                calendar_state["day_index"],
+                calendar_state["weekday_idx"],
+                0,
+            )
 
         results.append(DeckLimit(deck_id=deck.deck_id, name=deck.name, limit=limit))
 
@@ -387,16 +430,25 @@ def compute_schedule_health_snapshot(col, config) -> Dict[int, FractionalDeckHea
         feature_key=FEATURE_FRACTIONAL,
     )
     calendar_state = _calendar_state(col, config.epoch)
-    every_n_day_indices = _effective_every_n_days_day_indices(
-        col,
-        config.epoch,
-        decks,
-        assignments,
-        schedule_to_decks,
-        calendar_state["day_index"],
-    )
+    every_n_previews: Dict[str, Dict[int, List[int]]] = {}
 
     snapshot: Dict[int, FractionalDeckHealth] = {}
+
+    for schedule_id, scheduled_decks in schedule_to_decks.items():
+        if not scheduled_decks:
+            continue
+        schedule = assignments[scheduled_decks[0].deck_id]
+        if schedule["type"] != "every_n_days":
+            continue
+        every_n_previews[schedule_id] = _preview_every_n_days_sequences_by_deck(
+            col,
+            schedule,
+            scheduled_decks,
+            config.epoch,
+            calendar_state["day_index"],
+            _schedule_cycle_length(schedule),
+            all_decks=decks,
+        )
 
     for deck in decks:
         sched = assignments.get(deck.deck_id)
@@ -405,21 +457,27 @@ def compute_schedule_health_snapshot(col, config) -> Dict[int, FractionalDeckHea
 
         cycle_length = _schedule_cycle_length(sched)
         scheduled_decks = schedule_to_decks.get(str(sched["id"]), [])
-        day_index = every_n_day_indices.get(deck.deck_id, calendar_state["day_index"])
         next_positive_offset: Optional[int] = None
 
-        for offset in range(cycle_length):
-            limit = _limit_for_offset(
-                sched,
-                deck,
-                scheduled_decks,
-                day_index,
-                calendar_state["weekday_idx"],
-                offset,
-            )
-            if limit > 0:
-                next_positive_offset = offset
-                break
+        if sched["type"] == "every_n_days":
+            sequence = every_n_previews.get(str(sched["id"]), {}).get(deck.deck_id, [])
+            for offset, limit in enumerate(sequence):
+                if limit > 0:
+                    next_positive_offset = offset
+                    break
+        else:
+            for offset in range(cycle_length):
+                limit = _limit_for_offset(
+                    sched,
+                    deck,
+                    scheduled_decks,
+                    calendar_state["day_index"],
+                    calendar_state["weekday_idx"],
+                    offset,
+                )
+                if limit > 0:
+                    next_positive_offset = offset
+                    break
 
         snapshot[deck.deck_id] = FractionalDeckHealth(
             deck_id=deck.deck_id,
@@ -493,61 +551,85 @@ def _calendar_state(col, epoch: str) -> Dict[str, int]:
     }
 
 
-def _preview_every_n_days_day_indices(
+def _today_every_n_days_limits_for_schedule(
+    col,
+    schedule: Dict[str, Any],
+    all_decks: List[DeckInfo],
+    scheduled_decks: List[DeckInfo],
+    epoch: str,
+    raw_day_index: int,
+) -> Dict[int, int]:
+    sequences = _preview_every_n_days_sequences_by_deck(
+        col,
+        schedule,
+        scheduled_decks,
+        epoch,
+        raw_day_index,
+        1,
+        all_decks=all_decks,
+    )
+    return {
+        deck_id: int(sequence[0]) if sequence else 0
+        for deck_id, sequence in sequences.items()
+    }
+
+
+def _preview_every_n_days_sequences_by_deck(
     col,
     schedule: Dict[str, Any],
     scheduled_decks: List[DeckInfo],
     epoch: str,
     raw_day_index: int,
-) -> Dict[int, int]:
-    if raw_day_index <= 0 or not scheduled_decks:
-        return {}
+    days: int,
+    *,
+    all_decks: Optional[List[DeckInfo]] = None,
+) -> Dict[int, List[int]]:
+    if days <= 0 or not scheduled_decks:
+        return {deck.deck_id: [] for deck in scheduled_decks}
 
-    day_indices_by_deck = _effective_every_n_days_day_indices_for_schedule(
+    strategy = _fractional_strategy(schedule)
+    if strategy == "balance_first":
+        return _preview_balance_first_sequences_by_deck(
+            col,
+            schedule,
+            scheduled_decks,
+            epoch,
+            raw_day_index,
+            days,
+            all_decks=all_decks,
+        )
+
+    if strategy == "hash":
+        return {
+            deck.deck_id: [
+                _every_n_days_limit_for_day_index(
+                    schedule,
+                    deck,
+                    scheduled_decks,
+                    raw_day_index + offset,
+                )
+                for offset in range(days)
+            ]
+            for deck in scheduled_decks
+        }
+
+    effective_day_indices = _effective_every_n_days_day_indices_for_schedule(
         col,
         epoch,
-        _collect_decks(col),
+        all_decks or _collect_decks(col),
         schedule,
         scheduled_decks,
         raw_day_index,
     )
-    return {
-        deck.deck_id: day_indices_by_deck.get(deck.deck_id, raw_day_index)
-        for deck in scheduled_decks
-    }
-
-
-def _effective_every_n_days_day_indices(
-    col,
-    epoch: str,
-    decks: List[DeckInfo],
-    assignments: Dict[int, Dict[str, Any]],
-    schedule_to_decks: Dict[str, List[DeckInfo]],
-    raw_day_index: int,
-) -> Dict[int, int]:
-    if raw_day_index <= 0:
-        return {}
-
-    effective: Dict[int, int] = {}
-
-    for schedule_id, scheduled_decks in schedule_to_decks.items():
-        if not scheduled_decks:
-            continue
-        schedule = assignments[scheduled_decks[0].deck_id]
-        if schedule["type"] != "every_n_days":
-            continue
-        effective.update(
-            _effective_every_n_days_day_indices_for_schedule(
-                col,
-                epoch,
-                decks,
-                schedule,
-                scheduled_decks,
-                raw_day_index,
-            )
-        )
-
-    return effective
+    results: Dict[int, List[int]] = {}
+    for deck in scheduled_decks:
+        effective_day_index = effective_day_indices.get(deck.deck_id, raw_day_index)
+        pattern, phase = _every_n_days_pattern_and_phase(schedule, deck, scheduled_decks)
+        results[deck.deck_id] = [
+            _every_n_days_limit_from_pattern(pattern, phase, effective_day_index + offset)
+            for offset in range(days)
+        ]
+    return results
 
 
 def _effective_every_n_days_day_indices_for_schedule(
@@ -561,13 +643,17 @@ def _effective_every_n_days_day_indices_for_schedule(
     if raw_day_index <= 0 or not scheduled_decks:
         return {}
 
-    introduced_days = _new_introduction_days_by_assigned_deck(
+    introduction_events = _new_introduction_events_by_assigned_deck(
         col,
         epoch,
         all_decks,
         scheduled_decks,
         raw_day_index,
     )
+    introduced_days = {
+        deck_id: {event.day_index for event in events}
+        for deck_id, events in introduction_events.items()
+    }
 
     effective: Dict[int, int] = {}
     for deck in scheduled_decks:
@@ -581,13 +667,13 @@ def _effective_every_n_days_day_indices_for_schedule(
     return effective
 
 
-def _new_introduction_days_by_assigned_deck(
+def _new_introduction_events_by_assigned_deck(
     col,
     epoch: str,
     all_decks: List[DeckInfo],
     scheduled_decks: List[DeckInfo],
     raw_day_index: int,
-) -> Dict[int, Set[int]]:
+) -> Dict[int, List[IntroductionEvent]]:
     if raw_day_index <= 0 or not scheduled_decks:
         return {}
 
@@ -629,18 +715,31 @@ where r.id >= ?
     except Exception:
         return {}
 
-    introduced: Dict[int, Set[int]] = {}
+    introduced: Dict[int, List[IntroductionEvent]] = {}
     for revlog_id, source_did in rows:
         try:
             day_num = anki_day_number_from_timestamp(float(revlog_id) / 1000.0, rollover_hours)
             day_index = day_num - epoch_day
             source_deck_id = int(source_did)
+            timestamp_ms = int(revlog_id)
         except Exception:
             continue
         if day_index < 0 or day_index >= raw_day_index:
             continue
         for target_deck_id in source_to_targets.get(source_deck_id, []):
-            introduced.setdefault(target_deck_id, set()).add(day_index)
+            introduced.setdefault(target_deck_id, []).append(
+                IntroductionEvent(
+                    day_index=day_index,
+                    timestamp_ms=timestamp_ms,
+                    deck_id=target_deck_id,
+                )
+            )
+
+    for target_deck_id in list(introduced.keys()):
+        introduced[target_deck_id] = sorted(
+            introduced[target_deck_id],
+            key=lambda event: (event.day_index, event.timestamp_ms, event.deck_id),
+        )
 
     return introduced
 
@@ -652,20 +751,89 @@ def _shifted_every_n_days_day_index(
     scheduled_decks: List[DeckInfo],
     introduced_day_indices: Set[int],
 ) -> int:
-    if raw_day_index <= 0 or not introduced_day_indices:
+    if raw_day_index <= 0:
         return raw_day_index
 
-    start_day = min(day for day in introduced_day_indices if day < raw_day_index)
-    paused_days = 0
     pattern, phase = _every_n_days_pattern_and_phase(schedule, deck, scheduled_decks)
+    effective_day = 0
 
-    for calendar_day in range(start_day, raw_day_index):
-        effective_day = calendar_day - paused_days
+    for calendar_day in range(raw_day_index):
         scheduled_limit = _every_n_days_limit_from_pattern(pattern, phase, effective_day)
         if scheduled_limit > 0 and calendar_day not in introduced_day_indices:
-            paused_days += 1
+            # Hold the current release in place until the user actually introduces it.
+            continue
+        effective_day += 1
 
-    return raw_day_index - paused_days
+    return effective_day
+
+
+def _preview_balance_first_sequences_by_deck(
+    col,
+    schedule: Dict[str, Any],
+    scheduled_decks: List[DeckInfo],
+    epoch: str,
+    raw_day_index: int,
+    days: int,
+    *,
+    all_decks: Optional[List[DeckInfo]] = None,
+) -> Dict[int, List[int]]:
+    if days <= 0 or not scheduled_decks:
+        return {deck.deck_id: [] for deck in scheduled_decks}
+
+    queue = [deck.deck_id for deck in _stable_deck_order(schedule, scheduled_decks)]
+    events_by_deck = _new_introduction_events_by_assigned_deck(
+        col,
+        epoch,
+        all_decks or _collect_decks(col),
+        scheduled_decks,
+        raw_day_index,
+    )
+    past_events = sorted(
+        [
+            event
+            for events in events_by_deck.values()
+            for event in events
+        ],
+        key=lambda event: (event.day_index, event.timestamp_ms, event.deck_id),
+    )
+    for event in past_events:
+        queue = _rotate_deck_to_back(queue, event.deck_id)
+
+    budget_pattern = _schedule_daily_budget_pattern(schedule, len(scheduled_decks))
+    if not budget_pattern:
+        return {deck.deck_id: [0] * days for deck in scheduled_decks}
+
+    results = {deck.deck_id: [0] * days for deck in scheduled_decks}
+    for offset in range(days):
+        budget = budget_pattern[(raw_day_index + offset) % len(budget_pattern)]
+        todays_queue = queue[: max(0, budget)]
+        for deck_id in todays_queue:
+            results.setdefault(deck_id, [0] * days)[offset] = 1
+        queue = _rotate_front_slice_to_back(queue, len(todays_queue))
+
+    return results
+
+
+def _schedule_daily_budget_pattern(schedule: Dict[str, Any], deck_count: int) -> List[int]:
+    if deck_count <= 0:
+        return []
+    return distributed_counts(deck_count * int(schedule.get("m", 0)), int(schedule.get("n", 1)))
+
+
+def _rotate_deck_to_back(queue: List[int], deck_id: int) -> List[int]:
+    if deck_id not in queue:
+        return list(queue)
+    updated = list(queue)
+    updated.remove(deck_id)
+    updated.append(deck_id)
+    return updated
+
+
+def _rotate_front_slice_to_back(queue: List[int], count: int) -> List[int]:
+    if count <= 0:
+        return list(queue)
+    actual = min(count, len(queue))
+    return list(queue[actual:]) + list(queue[:actual])
 
 
 def _every_n_days_pattern_and_phase(
@@ -676,7 +844,10 @@ def _every_n_days_pattern_and_phase(
     n = int(schedule["n"])
     if n <= 0:
         return ([], 0)
-    phase = _assign_phases(schedule, scheduled_decks).get(deck.deck_id, 0)
+    if _fractional_strategy(schedule) == "hash":
+        phase = _hashed_phase(schedule, deck, n)
+    else:
+        phase = _assign_phases(schedule, scheduled_decks).get(deck.deck_id, 0)
     pattern = bresenham_pattern(int(schedule["m"]), n)
     return (pattern, phase)
 

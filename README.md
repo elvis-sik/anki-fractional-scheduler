@@ -19,10 +19,11 @@ An Anki add-on for two related jobs:
 ## Features
 - Each schedule can enable fractional limits, notify badges, both, or neither.
 - `Every N Days` schedules such as 1 card every 3 days.
+- Three fractional strategies for `every_n_days`: `balance_first`, `fraction_first`, and `hash`.
 - Day-of-week schedules with separate values for Mon-Sun.
 - Multiple deck targets per schedule using exact names or shell-style wildcards.
 - `Pick deck...` adds exact targets immediately, and `Add wildcard...` adds wildcard targets from the deck picker.
-- Optional staggering across matched decks: stable balanced or off.
+- Optional stable staggering for `fraction_first` and day-of-week schedules.
 - Fractional-only `leaf_only` matching so container decks do not receive limits.
 - Per-schedule notify descendant modes: direct only, any blocked descendant, all blocked descendants, or hide container badges.
 - Filtered decks are skipped.
@@ -60,6 +61,7 @@ The service only includes matched, non-dynamic decks that survive `leaf_only` fi
       "type": "every_n_days",
       "m": 1,
       "n": 3,
+      "fractional_strategy": "balance_first",
       "targets": ["Biology::*"],
       "fractional_enabled": true,
       "notify_enabled": true,
@@ -91,9 +93,11 @@ The service only includes matched, non-dynamic decks that survive `leaf_only` fi
 ```
 
 ## How It Works
-- For `every_n_days`, the add-on uses a deterministic, evenly spaced pattern (Bresenham-style) and optional staggering per deck.
-- For `every_n_days`, a day with `0` newly introduced cards does not consume that deck's slot; the cycle resumes when you actually introduce the next new card.
-- When staggering is enabled, existing decks keep their assigned offsets and newly matched decks are placed into the lightest current phase for that schedule.
+- For `every_n_days`, the add-on uses a deterministic, front-loaded repeating integer pattern for both per-deck cadence and group-level daily budgets.
+- `fraction_first` keeps each deck due as soon as its own cadence says it is owed another introduction, so missed days can bunch later work together.
+- `balance_first` uses a stable deck queue plus a shared daily budget so missed introductions keep their place without creating a catch-up spike the next day.
+- `hash` uses deterministic hashed offsets for a static spread that does not replay deck history.
+- When stable staggering is enabled, existing decks keep their assigned offsets and newly matched decks are placed into the lightest current phase for that schedule.
 - For `dow`, it applies the specified weekday limits (optionally rotated per deck if staggering is enabled).
 - Matching is by exact deck name or shell-style wildcard.
 - Notify schedules are assigned independently from fractional schedules, so a notify-only rule cannot steal fractional ownership from a deck.
