@@ -89,12 +89,8 @@ def _set_today_new_limit_via_deck_configs(col, deck_id: int, limit: int) -> bool
         req.target_deck_id = int(deck_id)
         req.mode = 0
         req.card_state_customizer = getattr(state, "card_state_customizer", "")
-        req.new_cards_ignore_review_limit = bool(
-            getattr(state, "new_cards_ignore_review_limit", False)
-        )
-        req.apply_all_parent_limits = bool(
-            getattr(state, "apply_all_parent_limits", False)
-        )
+        req.new_cards_ignore_review_limit = bool(getattr(state, "new_cards_ignore_review_limit", False))
+        req.apply_all_parent_limits = bool(getattr(state, "apply_all_parent_limits", False))
         req.fsrs = bool(getattr(state, "fsrs", False))
         req.fsrs_health_check = bool(getattr(state, "fsrs_health_check", False))
         req.configs.add().CopyFrom(selected_config)
@@ -201,9 +197,7 @@ def _deck_limit_matches(col, deck_id: int, limit: int) -> bool:
     limits = _get_backend_deck_limits(col, deck_id)
     if limits is not None:
         try:
-            if bool(getattr(limits, "new_today_active", False)) and int(
-                getattr(limits, "new_today")
-            ) == limit:
+            if bool(getattr(limits, "new_today_active", False)) and int(getattr(limits, "new_today")) == limit:
                 return True
         except Exception:
             pass

@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 import unittest
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "addon"))
@@ -30,7 +29,11 @@ class FakeBalanceCol:
         return [{"name": item.name, "id": item.deck_id} for item in self._decks]
 
     def get(self, deck_id: int):
-        return {"id": deck_id, "name": next(item.name for item in self._decks if item.deck_id == deck_id), "dyn": False}
+        return {
+            "id": deck_id,
+            "name": next(item.name for item in self._decks if item.deck_id == deck_id),
+            "dyn": False,
+        }
 
 
 class ShiftedEveryNDaysIndexTests(unittest.TestCase):
@@ -180,7 +183,11 @@ class StableBalancedPhaseTests(unittest.TestCase):
                 return [{"name": deck.name, "id": deck.deck_id} for deck in self._decks]
 
             def get(self, deck_id: int):
-                return {"id": deck_id, "name": next(deck.name for deck in self._decks if deck.deck_id == deck_id), "dyn": False}
+                return {
+                    "id": deck_id,
+                    "name": next(deck.name for deck in self._decks if deck.deck_id == deck_id),
+                    "dyn": False,
+                }
 
         sched = {
             "type": "every_n_days",

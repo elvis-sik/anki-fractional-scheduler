@@ -4,9 +4,8 @@ import fnmatch
 import hashlib
 import time
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
-
 
 VALID_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 FEATURE_FRACTIONAL = "fractional_enabled"
@@ -151,9 +150,7 @@ def match_deck_names_for_feature(
     return matches
 
 
-def filter_deck_names_for_schedule(
-    schedule: Dict[str, Any], deck_names: Iterable[str]
-) -> List[str]:
+def filter_deck_names_for_schedule(schedule: Dict[str, Any], deck_names: Iterable[str]) -> List[str]:
     all_names = list(deck_names)
     matches = match_deck_names(schedule.get("targets", []), all_names)
     if not schedule.get("leaf_only", True):
@@ -335,11 +332,7 @@ def _assign_phases(schedule: Dict[str, Any], decks: List[DeckInfo]) -> Dict[int,
     state["assignments"] = assignments
     schedule["stagger_state"] = state
 
-    return {
-        deck.deck_id: assignments.get(str(deck.deck_id), 0)
-        for deck in decks
-        if deck.deck_id in active_ids
-    }
+    return {deck.deck_id: assignments.get(str(deck.deck_id), 0) for deck in decks if deck.deck_id in active_ids}
 
 
 def _stable_stagger_state(schedule: Dict[str, Any], modulo: int) -> Dict[str, Any]:
@@ -357,10 +350,7 @@ def _stable_stagger_state(schedule: Dict[str, Any], modulo: int) -> Dict[str, An
                 if 0 <= phase < modulo:
                     assignments[deck_id] = phase
 
-        if (
-            raw_state.get("schedule_type") != schedule.get("type")
-            or int(raw_state.get("cycle_length") or 0) != modulo
-        ):
+        if raw_state.get("schedule_type") != schedule.get("type") or int(raw_state.get("cycle_length") or 0) != modulo:
             assignments = {}
 
     return {
@@ -498,9 +488,7 @@ def _schedule_assignments(
     feature_key: str = FEATURE_FRACTIONAL,
 ) -> Tuple[Dict[int, Dict[str, Any]], Dict[str, List[DeckInfo]]]:
     assignments: Dict[int, Dict[str, Any]] = {}
-    enabled_schedules = [
-        sched for sched in schedules if _schedule_feature_enabled(sched, feature_key)
-    ]
+    enabled_schedules = [sched for sched in schedules if _schedule_feature_enabled(sched, feature_key)]
 
     for deck in decks:
         if deck.is_dynamic:
@@ -568,10 +556,7 @@ def _today_every_n_days_limits_for_schedule(
         1,
         all_decks=all_decks,
     )
-    return {
-        deck_id: int(sequence[0]) if sequence else 0
-        for deck_id, sequence in sequences.items()
-    }
+    return {deck_id: int(sequence[0]) if sequence else 0 for deck_id, sequence in sequences.items()}
 
 
 def _preview_every_n_days_sequences_by_deck(
@@ -626,8 +611,7 @@ def _preview_every_n_days_sequences_by_deck(
         effective_day_index = effective_day_indices.get(deck.deck_id, raw_day_index)
         pattern, phase = _every_n_days_pattern_and_phase(schedule, deck, scheduled_decks)
         results[deck.deck_id] = [
-            _every_n_days_limit_from_pattern(pattern, phase, effective_day_index + offset)
-            for offset in range(days)
+            _every_n_days_limit_from_pattern(pattern, phase, effective_day_index + offset) for offset in range(days)
         ]
     return results
 
@@ -651,8 +635,7 @@ def _effective_every_n_days_day_indices_for_schedule(
         raw_day_index,
     )
     introduced_days = {
-        deck_id: {event.day_index for event in events}
-        for deck_id, events in introduction_events.items()
+        deck_id: {event.day_index for event in events} for deck_id, events in introduction_events.items()
     }
 
     effective: Dict[int, int] = {}
@@ -789,11 +772,7 @@ def _preview_balance_first_sequences_by_deck(
         raw_day_index,
     )
     past_events = sorted(
-        [
-            event
-            for events in events_by_deck.values()
-            for event in events
-        ],
+        [event for events in events_by_deck.values() for event in events],
         key=lambda event: (event.day_index, event.timestamp_ms, event.deck_id),
     )
     for event in past_events:

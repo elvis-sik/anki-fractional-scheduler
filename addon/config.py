@@ -132,9 +132,7 @@ def normalize_config(raw: Dict[str, Any]) -> AddonConfig:
             "leaf_only": bool(sched.get("leaf_only", True)),
             "fractional_enabled": bool(sched.get("fractional_enabled", True)),
             "notify_enabled": bool(sched.get("notify_enabled", False)),
-            "notify_descendant_mode": _normalize_notify_descendant_mode(
-                sched.get("notify_descendant_mode")
-            ),
+            "notify_descendant_mode": _normalize_notify_descendant_mode(sched.get("notify_descendant_mode")),
         }
 
         if sched_type == "every_n_days":
@@ -199,8 +197,6 @@ def _normalize_fractional_strategy(sched: Dict[str, Any]) -> str:
     return DEFAULT_FRACTIONAL_STRATEGY
 
 
-
-
 def _normalize_stagger_state(raw_state: Any) -> Optional[Dict[str, Any]]:
     if not isinstance(raw_state, dict):
         return None
@@ -241,9 +237,7 @@ def _schedule_to_dict(sched: Dict[str, Any]) -> Dict[str, Any]:
         "leaf_only": bool(sched.get("leaf_only", True)),
         "fractional_enabled": bool(sched.get("fractional_enabled", True)),
         "notify_enabled": bool(sched.get("notify_enabled", False)),
-        "notify_descendant_mode": _normalize_notify_descendant_mode(
-            sched.get("notify_descendant_mode")
-        ),
+        "notify_descendant_mode": _normalize_notify_descendant_mode(sched.get("notify_descendant_mode")),
     }
 
     if persisted["type"] == "every_n_days":

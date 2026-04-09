@@ -8,7 +8,7 @@ from .schedule import compute_deck_limits
 from .ui import SchedulerConfigDialog
 
 try:
-    from aqt import mw, gui_hooks
+    from aqt import gui_hooks, mw
     from aqt.qt import QAction
 except Exception:  # pragma: no cover
     mw = None

@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Iterable, Optional
 
-
 STATUS_LIMITS = "limits"
 STATUS_AVAILABILITY = "availability"
 STATUS_NORMAL = "normal"
@@ -127,15 +126,11 @@ def compute_notify_states(
         descendant_monitored_counts[parent] += subtree_monitored_counts[name]
         descendant_problem_counts[parent] += subtree_problem_counts[name]
         descendant_any_limits[parent] = descendant_any_limits[parent] or subtree_any_limits[name]
-        descendant_any_availability[parent] = (
-            descendant_any_availability[parent] or subtree_any_availability[name]
-        )
+        descendant_any_availability[parent] = descendant_any_availability[parent] or subtree_any_availability[name]
         subtree_monitored_counts[parent] += subtree_monitored_counts[name]
         subtree_problem_counts[parent] += subtree_problem_counts[name]
         subtree_any_limits[parent] = subtree_any_limits[parent] or subtree_any_limits[name]
-        subtree_any_availability[parent] = (
-            subtree_any_availability[parent] or subtree_any_availability[name]
-        )
+        subtree_any_availability[parent] = subtree_any_availability[parent] or subtree_any_availability[name]
 
     for name, state in by_name.items():
         if not state.monitored:
@@ -190,8 +185,7 @@ def badge_tooltip(state: NotifyDeckState) -> str:
             f"Suspended new in subtree: {state.agg_suspended_new}."
         )
     return (
-        "This deck has no unsuspended new cards available. "
-        f"Suspended new: {state.suspended_new}."
+        f"This deck has no unsuspended new cards available. Suspended new: {state.suspended_new}."
         if state.direct_status == STATUS_AVAILABILITY
         else (
             "This deck or a monitored descendant has no unsuspended new cards available. "
@@ -223,9 +217,7 @@ def _compute_self_status(
     return STATUS_NORMAL
 
 
-def _aggregate_status(
-    direct_status: Optional[str], descendant_status: Optional[str]
-) -> Optional[str]:
+def _aggregate_status(direct_status: Optional[str], descendant_status: Optional[str]) -> Optional[str]:
     if direct_status == STATUS_LIMITS or descendant_status == STATUS_LIMITS:
         return STATUS_LIMITS
     if direct_status == STATUS_AVAILABILITY or descendant_status == STATUS_AVAILABILITY:

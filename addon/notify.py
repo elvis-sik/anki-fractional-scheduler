@@ -69,9 +69,7 @@ def decorate_deck_browser(_deck_browser, content, config) -> None:
         return
 
     badges_by_did = {
-        deck_id: _render_badge_html(state)
-        for deck_id, state in states.items()
-        if should_show_badge(state)
+        deck_id: _render_badge_html(state) for deck_id, state in states.items() if should_show_badge(state)
     }
     if not badges_by_did:
         return

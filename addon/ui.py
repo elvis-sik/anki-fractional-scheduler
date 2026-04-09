@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
 import uuid
+from datetime import date, timedelta
 from typing import Any, Dict, List, Optional
 
 from aqt import mw
@@ -12,11 +12,11 @@ from aqt.qt import (
     QComboBox,
     QDialog,
     QFormLayout,
-    QHeaderView,
-    QGuiApplication,
-    QGroupBox,
     QGridLayout,
+    QGroupBox,
+    QGuiApplication,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -26,11 +26,11 @@ from aqt.qt import (
     QSizePolicy,
     QSpinBox,
     QStackedWidget,
-    QTabWidget,
+    Qt,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
-    Qt,
     QWidget,
 )
 
@@ -44,7 +44,6 @@ from .schedule import (
     preview_schedule,
     rebalance_schedule_offsets,
 )
-
 
 VALID_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 STAGGER_OPTIONS = [
@@ -65,9 +64,17 @@ FRACTIONAL_STRATEGY_OPTIONS = [
     ("Hash spread", "hash"),
 ]
 FRACTIONAL_STRATEGY_DESCRIPTIONS = {
-    "balance_first": "Use a rotating deck queue and a shared daily budget so missed decks keep their place without creating catch-up spikes.",
-    "fraction_first": "Keep each deck eligible as soon as its own cadence says it is due, even if that creates bunching after missed days.",
-    "hash": "Use a deterministic static spread based on deck identity, without history-sensitive catch-up or queue repair.",
+    "balance_first": (
+        "Use a rotating deck queue and a shared daily budget so missed decks keep their place "
+        "without creating catch-up spikes."
+    ),
+    "fraction_first": (
+        "Keep each deck eligible as soon as its own cadence says it is due, even if that creates "
+        "bunching after missed days."
+    ),
+    "hash": (
+        "Use a deterministic static spread based on deck identity, without history-sensitive catch-up or queue repair."
+    ),
 }
 NOTIFY_MODE_OPTIONS = [
     ("This row only", "direct_only"),
@@ -76,9 +83,11 @@ NOTIFY_MODE_OPTIONS = [
     ("Hide container badge", "hide_container_rows"),
 ]
 NOTIFY_MODE_DESCRIPTIONS = {
-    "direct_only": "Only this exact deck row checks its own direct cards. Descendants do not affect it.",
+    "direct_only": ("Only this exact deck row checks its own direct cards. Descendants do not affect it."),
     "any_blocked_descendant": "This row also warns when any included descendant deck is blocked.",
-    "all_included_descendants_blocked": "This row only warns for descendants when every included descendant deck is blocked.",
+    "all_included_descendants_blocked": (
+        "This row only warns for descendants when every included descendant deck is blocked."
+    ),
     "hide_container_rows": "Descendants still count for health, but pure container rows stay quiet.",
 }
 PREVIEW_DAYS = 14
@@ -94,16 +103,12 @@ def _copy_schedule(sched: Dict[str, Any]) -> Dict[str, Any]:
         "leaf_only": bool(sched.get("leaf_only", True)),
         "fractional_enabled": bool(sched.get("fractional_enabled", True)),
         "notify_enabled": bool(sched.get("notify_enabled", False)),
-        "notify_descendant_mode": str(
-            sched.get("notify_descendant_mode", "direct_only")
-        ),
+        "notify_descendant_mode": str(sched.get("notify_descendant_mode", "direct_only")),
     }
     if copied["type"] == "every_n_days":
         copied["m"] = int(sched.get("m", 1))
         copied["n"] = int(sched.get("n", 3))
-        copied["fractional_strategy"] = str(
-            sched.get("fractional_strategy", "fraction_first")
-        )
+        copied["fractional_strategy"] = str(sched.get("fractional_strategy", "fraction_first"))
     else:
         copied["by_day"] = dict(sched.get("by_day", {}) or {})
 
@@ -214,7 +219,8 @@ class SchedulerConfigDialog(QDialog):
         )
         self.rebalance_btn.clicked.connect(self._rebalance_current_schedule)
         self.rebalance_help = QLabel(
-            "Useful for stable offset schedules after deck additions or moves. This updates the preview only; apply limits separately."
+            "Useful for stable offset schedules after deck additions or moves. This updates the "
+            "preview only; apply limits separately."
         )
         self.rebalance_help.setWordWrap(True)
         self.rebalance_help.setStyleSheet("color: palette(mid);")
@@ -233,9 +239,7 @@ class SchedulerConfigDialog(QDialog):
         self.type_combo.currentIndexChanged.connect(self._on_type_changed)
         self.leaf_only_check = QCheckBox("Apply to leaf decks only")
         self.leaf_only_check.setChecked(True)
-        self.leaf_only_check.setToolTip(
-            "Skip container decks that only exist to hold subdecks."
-        )
+        self.leaf_only_check.setToolTip("Skip container decks that only exist to hold subdecks.")
         self.leaf_only_check.stateChanged.connect(self._refresh_preview)
         self.fractional_enabled_check = QCheckBox("Enable fractional new/day limits")
         self.fractional_enabled_check.setChecked(True)
@@ -257,9 +261,7 @@ class SchedulerConfigDialog(QDialog):
         self.type_help = QLabel()
         self.type_help.setWordWrap(True)
         self.type_help.setStyleSheet("color: palette(mid);")
-        self.leaf_only_help = QLabel(
-            "Recommended for wildcard targets so parent container decks do not get limits."
-        )
+        self.leaf_only_help = QLabel("Recommended for wildcard targets so parent container decks do not get limits.")
         self.leaf_only_help.setWordWrap(True)
         self.leaf_only_help.setStyleSheet("color: palette(mid);")
         self.feature_help = QLabel(
@@ -298,7 +300,8 @@ class SchedulerConfigDialog(QDialog):
         self.target_list.setMinimumHeight(80)
         self.target_list.setMaximumHeight(110)
         self.target_help = QLabel(
-            "Pick deck adds an exact target immediately. Targets also support shell-style wildcards like Deck::Subdeck*, *Chemistry*, or Deck??."
+            "Pick deck adds an exact target immediately. Targets also support shell-style wildcards "
+            "like Deck::Subdeck*, *Chemistry*, or Deck??."
         )
         self.target_help.setWordWrap(True)
         self.target_help.setStyleSheet("color: palette(mid);")
@@ -343,31 +346,23 @@ class SchedulerConfigDialog(QDialog):
         self.preview_table.verticalHeader().setVisible(False)
         self.preview_table.verticalHeader().setDefaultSectionSize(26)
         self.preview_table.horizontalHeader().setStretchLastSection(False)
-        self.preview_table.horizontalHeader().setDefaultAlignment(
-            Qt.AlignmentFlag.AlignCenter
-        )
+        self.preview_table.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview_table.horizontalHeader().setMinimumSectionSize(44)
         self.preview_table.horizontalHeader().setSectionsClickable(False)
         self.preview_table.horizontalHeader().setHighlightSections(False)
-        self.preview_table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Interactive
-        )
-        self.preview_table.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.preview_table.horizontalHeader().sectionResized.connect(
-            self._on_preview_column_resized
-        )
+        self.preview_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.preview_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.preview_table.horizontalHeader().sectionResized.connect(self._on_preview_column_resized)
         self.preview_table.setShowGrid(True)
         self.preview_table.setGridStyle(Qt.PenStyle.SolidLine)
         self.preview_table.setStyleSheet(
             "QTableWidget { gridline-color: #b8c4d3; alternate-background-color: #fafcff; }"
-            "QHeaderView::section { background: #eef4ff; padding: 6px 4px; font-weight: 600; border-top: 1px solid #b8c4d3; border-left: 1px solid #b8c4d3; border-right: 1px solid #8fa1b8; border-bottom: 1px solid #8fa1b8; }"
+            "QHeaderView::section { background: #eef4ff; padding: 6px 4px; font-weight: 600; "
+            "border-top: 1px solid #b8c4d3; border-left: 1px solid #b8c4d3; "
+            "border-right: 1px solid #8fa1b8; border-bottom: 1px solid #8fa1b8; }"
         )
         self.preview_table.setMinimumHeight(180)
-        self.preview_table.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
+        self.preview_table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         preview_layout.addWidget(self.preview_summary)
         preview_layout.addWidget(self.preview_table, 1)
         schedule_tab_layout.addWidget(preview_box, 1)
@@ -378,9 +373,7 @@ class SchedulerConfigDialog(QDialog):
         global_layout = QVBoxLayout(global_tab)
         global_layout.setContentsMargins(0, 0, 0, 0)
         global_layout.setSpacing(10)
-        global_help = QLabel(
-            "These settings apply to the addon as a whole, not the selected schedule."
-        )
+        global_help = QLabel("These settings apply to the addon as a whole, not the selected schedule.")
         global_help.setWordWrap(True)
         global_help.setStyleSheet("color: palette(mid);")
         global_layout.addWidget(global_help)
@@ -391,9 +384,7 @@ class SchedulerConfigDialog(QDialog):
         self.apply_on_collection_open_check = QCheckBox("On collection open")
         self.apply_once_per_day_check = QCheckBox("At most once per day")
         self.apply_on_sync_check = QCheckBox("After sync")
-        self.apply_on_profile_open_check.setToolTip(
-            "Apply schedules automatically when Anki opens a profile."
-        )
+        self.apply_on_profile_open_check.setToolTip("Apply schedules automatically when Anki opens a profile.")
         self.apply_on_collection_open_check.setToolTip(
             "Apply schedules automatically when the collection finishes loading."
         )
@@ -455,12 +446,8 @@ class SchedulerConfigDialog(QDialog):
         layout = QFormLayout(w)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
-        layout.setFormAlignment(
-            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft
-        )
-        layout.setLabelAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-        )
+        layout.setFormAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         self.m_spin = QSpinBox()
         self.m_spin.setMinimum(0)
@@ -481,7 +468,9 @@ class SchedulerConfigDialog(QDialog):
         n_label.setToolTip("Length of the cycle in days. The cards are spread evenly across this cycle.")
         strategy_label = QLabel("Strategy")
         strategy_label.setToolTip("Controls how grouped decks react when some scheduled introductions are missed.")
-        self.fractional_strategy_combo.setToolTip("Choose whether this schedule prioritizes cadence, balance, or a static hash-based spread.")
+        self.fractional_strategy_combo.setToolTip(
+            "Choose whether this schedule prioritizes cadence, balance, or a static hash-based spread."
+        )
         self.fractional_strategy_help = QLabel()
         self.fractional_strategy_help.setWordWrap(True)
         self.fractional_strategy_help.setStyleSheet("color: palette(mid);")
@@ -490,7 +479,9 @@ class SchedulerConfigDialog(QDialog):
         layout.addRow(strategy_label, self.fractional_strategy_combo)
         layout.addRow("", self.fractional_strategy_help)
         self.every_stagger_label = QLabel("Stagger")
-        self.every_stagger_label.setToolTip("Spread decks across days so they don't all introduce cards on the same day.")
+        self.every_stagger_label.setToolTip(
+            "Spread decks across days so they don't all introduce cards on the same day."
+        )
         self.stagger_mode.setToolTip("Controls whether matching decks are offset from each other.")
         self.stagger_help = QLabel()
         self.stagger_help.setWordWrap(True)
@@ -502,9 +493,7 @@ class SchedulerConfigDialog(QDialog):
         self.n_spin.editingFinished.connect(self._refresh_preview)
         self.m_spin.valueChanged.connect(self._on_numeric_value_changed)
         self.n_spin.valueChanged.connect(self._on_numeric_value_changed)
-        self.fractional_strategy_combo.currentIndexChanged.connect(
-            self._on_fractional_strategy_changed
-        )
+        self.fractional_strategy_combo.currentIndexChanged.connect(self._on_fractional_strategy_changed)
         self.stagger_mode.currentIndexChanged.connect(self._on_stagger_mode_changed)
 
         return w
@@ -754,17 +743,13 @@ class SchedulerConfigDialog(QDialog):
             "leaf_only": bool(base.get("leaf_only", True)),
             "fractional_enabled": bool(base.get("fractional_enabled", True)),
             "notify_enabled": bool(base.get("notify_enabled", False)),
-            "notify_descendant_mode": str(
-                base.get("notify_descendant_mode", "direct_only")
-            ),
+            "notify_descendant_mode": str(base.get("notify_descendant_mode", "direct_only")),
             "stagger": dict(base.get("stagger", {})) if base.get("stagger") else {"mode": "stable"},
         }
         if copied["type"] == "every_n_days":
             copied["m"] = int(base.get("m", 1))
             copied["n"] = int(base.get("n", 3))
-            copied["fractional_strategy"] = str(
-                base.get("fractional_strategy", "fraction_first")
-            )
+            copied["fractional_strategy"] = str(base.get("fractional_strategy", "fraction_first"))
         else:
             copied["by_day"] = dict(base.get("by_day", {}))
 
@@ -785,9 +770,7 @@ class SchedulerConfigDialog(QDialog):
             return
         uid = self._selected_uid()
         schedules = self.config.get("schedules", [])
-        self.config["schedules"] = [
-            sched for sched in schedules if str(sched.get("_uid", "")) != uid
-        ]
+        self.config["schedules"] = [sched for sched in schedules if str(sched.get("_uid", "")) != uid]
         self._persist_config()
         self.schedule_list.takeItem(row)
         self._update_schedule_summary()
@@ -870,9 +853,10 @@ class SchedulerConfigDialog(QDialog):
         sched = self._current_schedule()
         if sched is None:
             return
-        if sched.get("type") == "every_n_days" and str(
-            sched.get("fractional_strategy", "fraction_first")
-        ) != "fraction_first":
+        if (
+            sched.get("type") == "every_n_days"
+            and str(sched.get("fractional_strategy", "fraction_first")) != "fraction_first"
+        ):
             return
         rebalance_schedule_offsets(mw.col, sched)
         self._persist_config()
@@ -937,15 +921,9 @@ class SchedulerConfigDialog(QDialog):
     def _load_defaults(self) -> None:
         self._building = True
         defaults = self.config.get("defaults", DEFAULT_CONFIG["defaults"])
-        self.apply_on_profile_open_check.setChecked(
-            bool(defaults.get("apply_on_profile_open", True))
-        )
-        self.apply_on_collection_open_check.setChecked(
-            bool(defaults.get("apply_on_collection_open", True))
-        )
-        self.apply_once_per_day_check.setChecked(
-            bool(defaults.get("apply_once_per_day", True))
-        )
+        self.apply_on_profile_open_check.setChecked(bool(defaults.get("apply_on_profile_open", True)))
+        self.apply_on_collection_open_check.setChecked(bool(defaults.get("apply_on_collection_open", True)))
+        self.apply_once_per_day_check.setChecked(bool(defaults.get("apply_once_per_day", True)))
         self.apply_on_sync_check.setChecked(bool(defaults.get("apply_on_sync", False)))
         self._building = False
 
@@ -1050,9 +1028,7 @@ class SchedulerConfigDialog(QDialog):
         label.setText(STAGGER_DESCRIPTIONS.get(mode, ""))
 
     def _update_fractional_strategy_help(self, strategy: str) -> None:
-        self.fractional_strategy_help.setText(
-            FRACTIONAL_STRATEGY_DESCRIPTIONS.get(strategy, "")
-        )
+        self.fractional_strategy_help.setText(FRACTIONAL_STRATEGY_DESCRIPTIONS.get(strategy, ""))
 
     def _refresh_strategy_controls(self) -> None:
         strategy = self._fractional_strategy_value()
@@ -1063,13 +1039,20 @@ class SchedulerConfigDialog(QDialog):
         if not every_uses_stagger:
             self.stagger_help.setText("This strategy does not use per-deck stagger offsets.")
         else:
-            self._update_stagger_help(self.stagger_help, self._stagger_mode_value(self.stagger_mode))
+            self._update_stagger_help(
+                self.stagger_help,
+                self._stagger_mode_value(self.stagger_mode),
+            )
         self._update_fractional_strategy_help(strategy)
         rebalance_enabled = False
         if self.type_combo.currentIndex() == 0:
-            rebalance_enabled = every_enabled and every_uses_stagger and self._stagger_mode_value(self.stagger_mode) != "none"
+            rebalance_enabled = (
+                every_enabled and every_uses_stagger and self._stagger_mode_value(self.stagger_mode) != "none"
+            )
         elif self.type_combo.currentIndex() == 1:
-            rebalance_enabled = self.type_combo.isEnabled() and self._stagger_mode_value(self.dow_stagger_mode) != "none"
+            rebalance_enabled = (
+                self.type_combo.isEnabled() and self._stagger_mode_value(self.dow_stagger_mode) != "none"
+            )
         self.rebalance_btn.setEnabled(rebalance_enabled)
 
     def _update_type_help(self) -> None:
@@ -1085,17 +1068,13 @@ class SchedulerConfigDialog(QDialog):
         self.notify_mode_combo.setCurrentIndex(index if index >= 0 else 0)
 
     def _update_notify_mode_help(self) -> None:
-        self.notify_mode_help.setText(
-            NOTIFY_MODE_DESCRIPTIONS.get(self._notify_mode_value(), "")
-        )
+        self.notify_mode_help.setText(NOTIFY_MODE_DESCRIPTIONS.get(self._notify_mode_value(), ""))
 
     def _refresh_feature_controls(self) -> None:
         notify_enabled = self.notify_enabled_check.isChecked()
         fractional_enabled = self.fractional_enabled_check.isChecked()
         self.notify_mode_combo.setEnabled(notify_enabled and self.notify_enabled_check.isEnabled())
-        self.leaf_only_check.setEnabled(
-            fractional_enabled and self.fractional_enabled_check.isEnabled()
-        )
+        self.leaf_only_check.setEnabled(fractional_enabled and self.fractional_enabled_check.isEnabled())
         self.leaf_only_help.setEnabled(fractional_enabled)
         self._update_notify_mode_help()
         self._refresh_strategy_controls()
@@ -1105,9 +1084,7 @@ class SchedulerConfigDialog(QDialog):
         self.preview_table.setRowCount(0)
         self.preview_table.setColumnCount(0)
 
-    def _populate_preview_table(
-        self, deck_names: List[str], data: Dict[str, List[int]]
-    ) -> None:
+    def _populate_preview_table(self, deck_names: List[str], data: Dict[str, List[int]]) -> None:
         headers = ["Deck", *self._preview_day_headers(PREVIEW_DAYS)]
         self._preview_width_update_in_progress = True
         self.preview_table.clear()
@@ -1115,13 +1092,9 @@ class SchedulerConfigDialog(QDialog):
         self.preview_table.setHorizontalHeaderLabels(headers)
         self.preview_table.setRowCount(len(deck_names) + 1)
         self.preview_table.setColumnWidth(0, 280)
-        self.preview_table.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.Interactive
-        )
+        self.preview_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
         for column in range(1, len(headers)):
-            self.preview_table.horizontalHeader().setSectionResizeMode(
-                column, QHeaderView.ResizeMode.Interactive
-            )
+            self.preview_table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.Interactive)
             self.preview_table.setColumnWidth(column, 52)
         self._apply_preview_column_widths(len(headers))
 
@@ -1169,9 +1142,7 @@ class SchedulerConfigDialog(QDialog):
             headers.append(f"{current.strftime('%a')}\n{current.strftime('%d')}")
         return headers
 
-    def _sorted_preview_names(
-        self, deck_names: List[str], data: Dict[str, List[int]]
-    ) -> List[str]:
+    def _sorted_preview_names(self, deck_names: List[str], data: Dict[str, List[int]]) -> List[str]:
         return sorted(
             deck_names,
             key=lambda name: (tuple(int(v) for v in data.get(name, [])), name.lower()),
@@ -1202,17 +1173,12 @@ class SchedulerConfigDialog(QDialog):
         return saved
 
     def _store_preview_column_widths(self) -> None:
-        widths = [
-            int(self.preview_table.columnWidth(column))
-            for column in range(self.preview_table.columnCount())
-        ]
+        widths = [int(self.preview_table.columnWidth(column)) for column in range(self.preview_table.columnCount())]
         defaults = dict(self.config.get("defaults", DEFAULT_CONFIG["defaults"]))
         defaults["preview_column_widths"] = widths
         self.config["defaults"] = defaults
 
-    def _on_preview_column_resized(
-        self, _logical_index: int, _old_size: int, _new_size: int
-    ) -> None:
+    def _on_preview_column_resized(self, _logical_index: int, _old_size: int, _new_size: int) -> None:
         if self._preview_width_update_in_progress or self._building:
             return
         self._store_preview_column_widths()
@@ -1271,9 +1237,7 @@ class SchedulerConfigDialog(QDialog):
             return
         current.adjustSize()
         layout = current.layout()
-        content_height = (
-            layout.sizeHint().height() if layout is not None else current.sizeHint().height()
-        )
+        content_height = layout.sizeHint().height() if layout is not None else current.sizeHint().height()
         self.stack.setFixedHeight(content_height)
         self.rule_box.setFixedHeight(content_height + 38)
 
@@ -1308,18 +1272,15 @@ class SchedulerConfigDialog(QDialog):
             self.target_summary.setText("No matching decks for the current targets.")
             return
         if not fractional_enabled:
-            self.target_summary.setText(
-                f"{len(applied_matches)} decks will {action} with the current targets."
-            )
+            self.target_summary.setText(f"{len(applied_matches)} decks will {action} with the current targets.")
             return
         if leaf_only and skipped:
             self.target_summary.setText(
-                f"{len(raw_matches)} decks matched. {len(applied_matches)} leaf decks will {action}; {skipped} parent decks are skipped."
+                f"{len(raw_matches)} decks matched. {len(applied_matches)} leaf decks will "
+                f"{action}; {skipped} parent decks are skipped."
             )
             return
-        self.target_summary.setText(
-            f"{len(applied_matches)} decks will {action} with the current targets."
-        )
+        self.target_summary.setText(f"{len(applied_matches)} decks will {action} with the current targets.")
 
     def _ensure_unique_id(self, base_id: str, exclude_uid: Optional[str] = None) -> str:
         existing = []
@@ -1401,11 +1362,7 @@ def _all_deck_names() -> List[str]:
             pass
     if hasattr(decks, "all"):
         try:
-            return [
-                d.get("name")
-                for d in decks.all()
-                if isinstance(d, dict) and d.get("name") and not d.get("dyn")
-            ]
+            return [d.get("name") for d in decks.all() if isinstance(d, dict) and d.get("name") and not d.get("dyn")]
         except Exception:
             pass
     if hasattr(decks, "all_names"):
