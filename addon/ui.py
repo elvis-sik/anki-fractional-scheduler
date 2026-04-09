@@ -11,6 +11,7 @@ from aqt.qt import (
     QColor,
     QComboBox,
     QDialog,
+    QEvent,
     QFormLayout,
     QGridLayout,
     QGroupBox,
@@ -434,6 +435,9 @@ class SchedulerConfigDialog(QDialog):
         buttons = QHBoxLayout()
         self.apply_now_status = QLabel("")
         self.apply_now_status.setStyleSheet("color: palette(mid);")
+        self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn.setToolTip("Reload the preview and queue from the current Anki state.")
+        self.refresh_btn.clicked.connect(self._manual_refresh)
         self.apply_now_btn = QPushButton("Apply Now")
         self.apply_now_btn.setToolTip("Recompute and apply today-only limits immediately.")
         self.apply_now_btn.clicked.connect(self._apply_now)
@@ -441,6 +445,7 @@ class SchedulerConfigDialog(QDialog):
         self.close_btn.setDefault(True)
         self.close_btn.clicked.connect(self._close_dialog)
         buttons.addWidget(self.apply_now_status, 1)
+        buttons.addWidget(self.refresh_btn)
         buttons.addWidget(self.apply_now_btn)
         buttons.addWidget(self.close_btn)
 
@@ -1013,6 +1018,21 @@ class SchedulerConfigDialog(QDialog):
             return
         self.apply_now_status.setText(f"Applied {applied}/{total} limits.")
         self._refresh_preview()
+
+    def _manual_refresh(self) -> None:
+        self._refresh_preview()
+        self.apply_now_status.setText("Preview refreshed.")
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if not self._building:
+            self._refresh_preview()
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
+            if not self._building:
+                self._refresh_preview()
 
     def reject(self) -> None:
         self._commit_current()
