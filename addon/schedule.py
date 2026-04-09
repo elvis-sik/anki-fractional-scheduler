@@ -679,6 +679,7 @@ def _effective_every_n_days_day_indices_for_schedule(
         all_decks,
         scheduled_decks,
         raw_day_index,
+        start_day_index=0,
     )
     introduced_days = {
         deck_id: {event.day_index for event in events} for deck_id, events in introduction_events.items()
@@ -702,6 +703,9 @@ def _new_introduction_events_by_assigned_deck(
     all_decks: List[DeckInfo],
     scheduled_decks: List[DeckInfo],
     raw_day_index: int,
+    *,
+    start_day_index: Optional[int] = 0,
+    allow_pre_epoch_events: bool = False,
 ) -> Dict[int, List[IntroductionEvent]]:
     if raw_day_index <= 0 or not scheduled_decks:
         return {}
@@ -721,20 +725,23 @@ def _new_introduction_events_by_assigned_deck(
 
     rollover_hours = _rollover_hours(col)
     epoch_day = anki_day_number_from_date_str(epoch, rollover_hours)
-    start_ms = int(((epoch_day * 86400) + (rollover_hours * 3600)) * 1000)
+    start_ms: Optional[int] = None
+    if start_day_index is not None:
+        start_day = epoch_day + int(start_day_index)
+        start_ms = int(((start_day * 86400) + (rollover_hours * 3600)) * 1000)
     end_day = epoch_day + raw_day_index
     end_ms = int(((end_day * 86400) + (rollover_hours * 3600)) * 1000)
 
     ordered_source_ids = sorted(relevant_source_ids)
     placeholders = ",".join("?" for _ in ordered_source_ids)
+    lower_bound_clause = "  and r.id >= ?\n" if start_ms is not None else ""
     sql = f"""
 select r.id,
        case when c.odid = 0 then c.did else c.odid end as original_did
 from revlog as r
 join cards as c on c.id = r.cid
 where (case when c.odid = 0 then c.did else c.odid end) in ({placeholders})
-  and r.id >= ?
-  and r.id < ?
+{lower_bound_clause}  and r.id < ?
   and not exists (
       select 1
       from revlog as older
@@ -744,7 +751,11 @@ where (case when c.odid = 0 then c.did else c.odid end) in ({placeholders})
 """
 
     try:
-        rows = col.db.all(sql, *ordered_source_ids, start_ms, end_ms)
+        args: List[Any] = list(ordered_source_ids)
+        if start_ms is not None:
+            args.append(start_ms)
+        args.append(end_ms)
+        rows = col.db.all(sql, *args)
     except Exception:
         return {}
 
@@ -757,7 +768,9 @@ where (case when c.odid = 0 then c.did else c.odid end) in ({placeholders})
             timestamp_ms = int(revlog_id)
         except Exception:
             continue
-        if day_index < 0 or day_index >= raw_day_index:
+        if day_index >= raw_day_index:
+            continue
+        if day_index < 0 and not allow_pre_epoch_events:
             continue
         for target_deck_id in source_to_targets.get(source_deck_id, []):
             introduced.setdefault(target_deck_id, []).append(
@@ -879,6 +892,8 @@ def _balance_first_queue_state_for_day_index(
         all_decks or _collect_decks(col),
         scheduled_decks,
         history_limit,
+        start_day_index=None,
+        allow_pre_epoch_events=True,
     )
     all_events = sorted(
         [event for events in events_by_deck.values() for event in events],

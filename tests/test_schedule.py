@@ -411,6 +411,34 @@ class DailyBudgetPatternTests(unittest.TestCase):
 
         self.assertEqual([entry.last_introduction_day_offset for entry in snapshot], [1, 0])
 
+    def test_balance_first_last_new_includes_pre_epoch_history(self) -> None:
+        sched = {
+            "id": "group",
+            "type": "every_n_days",
+            "m": 1,
+            "n": 2,
+            "fractional_strategy": "balance_first",
+        }
+        decks = [deck(1, "A")]
+        col = FakeSqliteBalanceCol(decks, today=anki_today_for_day_index(1))
+        col.db._conn.execute(
+            "insert into cards(id, did, odid) values (?, ?, ?)",
+            (101, 1, 0),
+        )
+        col.db._conn.execute(
+            "insert into revlog(id, cid) values (?, ?)",
+            (revlog_id_for_day_index(-2), 101),
+        )
+
+        snapshot = schedule.balance_first_queue_snapshot(
+            col,
+            sched,
+            [item.name for item in decks],
+            "2026-01-01",
+        )
+
+        self.assertEqual([entry.last_introduction_day_offset for entry in snapshot], [3])
+
 
 class FeatureAssignmentTests(unittest.TestCase):
     def test_notify_assignment_can_inherit_descendants_from_exact_parent_target(self) -> None:
