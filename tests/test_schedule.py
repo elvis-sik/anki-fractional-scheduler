@@ -15,15 +15,22 @@ def deck(deck_id: int, name: str) -> schedule.DeckInfo:
 
 
 class FakeBalanceCol:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        decks: list[schedule.DeckInfo] | None = None,
+        *,
+        today: int = 10,
+        rows: list[tuple[int, int]] | None = None,
+    ) -> None:
         self.conf = {"rollover": 4}
         self.db = self
-        self.sched = type("Sched", (), {"today": 10})()
+        self.sched = type("Sched", (), {"today": today})()
         self.decks = self
-        self._decks = [deck(1, "A"), deck(2, "B"), deck(3, "C"), deck(4, "D")]
+        self._decks = decks or [deck(1, "A"), deck(2, "B"), deck(3, "C"), deck(4, "D")]
+        self._rows = rows or []
 
     def all(self, _sql: str, *_args):
-        return []
+        return list(self._rows)
 
     def all_names_and_ids(self):
         return [{"name": item.name, "id": item.deck_id} for item in self._decks]
@@ -34,6 +41,16 @@ class FakeBalanceCol:
             "name": next(item.name for item in self._decks if item.deck_id == deck_id),
             "dyn": False,
         }
+
+
+def revlog_id_for_day_index(day_index: int, *, epoch: str = "2026-01-01", rollover: int = 4) -> int:
+    epoch_day = schedule.anki_day_number_from_date_str(epoch, rollover)
+    day_num = epoch_day + day_index
+    return int(((day_num * 86400) + (rollover * 3600) + 60) * 1000)
+
+
+def anki_today_for_day_index(day_index: int, *, epoch: str = "2026-01-01", rollover: int = 4) -> int:
+    return schedule.anki_day_number_from_date_str(epoch, rollover) + day_index
 
 
 class ShiftedEveryNDaysIndexTests(unittest.TestCase):
@@ -267,6 +284,68 @@ class DailyBudgetPatternTests(unittest.TestCase):
 
         self.assertEqual(first, second)
         self.assertEqual(sum(first[0]), 1)
+
+    def test_balance_first_queue_snapshot_shows_pending_due_decks_first(self) -> None:
+        sched = {
+            "id": "group",
+            "type": "every_n_days",
+            "m": 1,
+            "n": 2,
+            "fractional_strategy": "balance_first",
+        }
+        decks = [deck(1, "A"), deck(2, "B"), deck(3, "C"), deck(4, "D")]
+        stable_order = [item.deck_id for item in schedule._stable_deck_order(sched, decks)]
+        day0_deck = stable_order[0]
+        day1_deck = stable_order[1]
+
+        col = FakeBalanceCol(
+            decks,
+            today=anki_today_for_day_index(1),
+            rows=[
+                (revlog_id_for_day_index(0), day0_deck),
+                (revlog_id_for_day_index(1), day1_deck),
+            ],
+        )
+
+        snapshot = schedule.balance_first_queue_snapshot(
+            col,
+            sched,
+            [item.name for item in decks],
+            "2026-01-01",
+        )
+
+        queue_order = [entry.deck_id for entry in snapshot]
+        self.assertEqual(queue_order[0], stable_order[2])
+        self.assertEqual(snapshot[0].next_due_day_offset, 0)
+        self.assertEqual(snapshot[-1].deck_id, day1_deck)
+        self.assertEqual(snapshot[-1].last_introduction_day_offset, 0)
+        self.assertEqual(snapshot[-1].next_due_day_offset, 2)
+
+    def test_balance_first_queue_snapshot_without_history_uses_initial_order(self) -> None:
+        sched = {
+            "id": "group",
+            "type": "every_n_days",
+            "m": 1,
+            "n": 2,
+            "fractional_strategy": "balance_first",
+        }
+        decks = [deck(1, "A"), deck(2, "B"), deck(3, "C"), deck(4, "D")]
+        col = FakeBalanceCol(decks, today=anki_today_for_day_index(0), rows=[])
+
+        snapshot = schedule.balance_first_queue_snapshot(
+            col,
+            sched,
+            [item.name for item in decks],
+            "2026-01-01",
+        )
+
+        self.assertEqual(
+            [entry.deck_id for entry in snapshot],
+            [item.deck_id for item in schedule._stable_deck_order(sched, decks)],
+        )
+        self.assertEqual([entry.next_due_day_offset for entry in snapshot[:2]], [0, 0])
+        self.assertEqual([entry.next_due_day_offset for entry in snapshot[2:]], [1, 1])
+        self.assertEqual([entry.last_introduction_day_offset for entry in snapshot], [None] * 4)
 
 
 class FeatureAssignmentTests(unittest.TestCase):

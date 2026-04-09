@@ -38,6 +38,7 @@ from .config import DEFAULT_CONFIG, config_to_dict, load_config, normalize_confi
 from .notify import refresh_deck_browser
 from .schedule import (
     FEATURE_NOTIFY,
+    balance_first_queue_snapshot,
     filter_deck_names_for_schedule,
     match_deck_names,
     match_deck_names_for_feature,
@@ -365,6 +366,28 @@ class SchedulerConfigDialog(QDialog):
         self.preview_table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         preview_layout.addWidget(self.preview_summary)
         preview_layout.addWidget(self.preview_table, 1)
+        self.balance_queue_box = QGroupBox("Balance-First Queue")
+        balance_queue_layout = QVBoxLayout(self.balance_queue_box)
+        self.balance_queue_summary = QLabel("Queue details are available for balance-first schedules.")
+        self.balance_queue_summary.setWordWrap(True)
+        self.balance_queue_summary.setStyleSheet("color: palette(mid);")
+        self.balance_queue_table = QTableWidget()
+        self.balance_queue_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.balance_queue_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        self.balance_queue_table.setAlternatingRowColors(True)
+        self.balance_queue_table.setWordWrap(False)
+        self.balance_queue_table.verticalHeader().setVisible(False)
+        self.balance_queue_table.verticalHeader().setDefaultSectionSize(24)
+        self.balance_queue_table.horizontalHeader().setStretchLastSection(True)
+        self.balance_queue_table.horizontalHeader().setSectionsClickable(False)
+        self.balance_queue_table.horizontalHeader().setHighlightSections(False)
+        self.balance_queue_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.balance_queue_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.balance_queue_table.setMinimumHeight(160)
+        balance_queue_layout.addWidget(self.balance_queue_summary)
+        balance_queue_layout.addWidget(self.balance_queue_table, 1)
+        self.balance_queue_box.setVisible(False)
+        preview_layout.addWidget(self.balance_queue_box)
         schedule_tab_layout.addWidget(preview_box, 1)
         preview_box.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         schedule_tab_layout.addStretch(1)
@@ -568,6 +591,8 @@ class SchedulerConfigDialog(QDialog):
         self.target_list.clear()
         self.target_summary.setText("No targets yet.")
         self._clear_preview_table()
+        self._clear_balance_queue_table()
+        self.balance_queue_box.setVisible(False)
         self.preview_summary.setText("Select a schedule to preview it.")
         self._building = False
 
@@ -899,10 +924,14 @@ class SchedulerConfigDialog(QDialog):
                 f"{label} Fractional limits are disabled for this schedule, so no daily limit preview is shown."
             )
             self._clear_preview_table()
+            self._clear_balance_queue_table()
+            self.balance_queue_box.setVisible(False)
             return
         if not matches:
             self.preview_summary.setText("No decks will receive limits with the current targets.")
             self._clear_preview_table()
+            self._clear_balance_queue_table()
+            self.balance_queue_box.setVisible(False)
             return
 
         data = preview_schedule(
@@ -917,6 +946,21 @@ class SchedulerConfigDialog(QDialog):
             f"{len(matches)} matching {summary_kind}. Scroll to see all decks and daily totals."
         )
         self._populate_preview_table(self._sorted_preview_names(matches, data), data)
+        if (
+            sched.get("type") == "every_n_days"
+            and str(sched.get("fractional_strategy", "fraction_first")) == "balance_first"
+        ):
+            queue_entries = balance_first_queue_snapshot(
+                mw.col,
+                sched,
+                matches,
+                self.config.get("epoch", "2026-01-01"),
+            )
+            self.balance_queue_box.setVisible(True)
+            self._populate_balance_queue_table(queue_entries)
+        else:
+            self._clear_balance_queue_table()
+            self.balance_queue_box.setVisible(False)
 
     def _load_defaults(self) -> None:
         self._building = True
@@ -1084,6 +1128,12 @@ class SchedulerConfigDialog(QDialog):
         self.preview_table.setRowCount(0)
         self.preview_table.setColumnCount(0)
 
+    def _clear_balance_queue_table(self) -> None:
+        self.balance_queue_table.clear()
+        self.balance_queue_table.setRowCount(0)
+        self.balance_queue_table.setColumnCount(0)
+        self.balance_queue_summary.setText("Queue details are available for balance-first schedules.")
+
     def _populate_preview_table(self, deck_names: List[str], data: Dict[str, List[int]]) -> None:
         headers = ["Deck", *self._preview_day_headers(PREVIEW_DAYS)]
         self._preview_width_update_in_progress = True
@@ -1134,6 +1184,55 @@ class SchedulerConfigDialog(QDialog):
 
         self.preview_table.resizeRowsToContents()
         self._preview_width_update_in_progress = False
+
+    def _populate_balance_queue_table(self, queue_entries: List[Any]) -> None:
+        headers = ["#", "Deck", "Last New", "Next New"]
+        self.balance_queue_table.clear()
+        self.balance_queue_table.setColumnCount(len(headers))
+        self.balance_queue_table.setHorizontalHeaderLabels(headers)
+        self.balance_queue_table.setRowCount(len(queue_entries))
+        self.balance_queue_table.setColumnWidth(0, 44)
+        self.balance_queue_table.setColumnWidth(1, 260)
+        self.balance_queue_table.setColumnWidth(2, 140)
+        self.balance_queue_table.setColumnWidth(3, 140)
+
+        due_today = sum(1 for entry in queue_entries if getattr(entry, "next_due_day_offset", None) == 0)
+        self.balance_queue_summary.setText(
+            f"{len(queue_entries)} decks in queue order. {due_today} currently due. "
+            "Next New assumes currently pending decks are studied when offered."
+        )
+
+        for row, entry in enumerate(queue_entries):
+            self._set_queue_item(
+                row,
+                0,
+                str(entry.position),
+                align=Qt.AlignmentFlag.AlignCenter,
+            )
+            self._set_queue_item(
+                row,
+                1,
+                entry.deck_name,
+                align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                tooltip=entry.deck_name,
+            )
+            self._set_queue_item(
+                row,
+                2,
+                self._format_last_seen_offset(entry.last_introduction_day_offset),
+                align=Qt.AlignmentFlag.AlignCenter,
+            )
+            self._set_queue_item(
+                row,
+                3,
+                self._format_next_seen_offset(entry.next_due_day_offset),
+                align=Qt.AlignmentFlag.AlignCenter,
+                bold=entry.next_due_day_offset == 0,
+                background=QColor("#dff2e4") if entry.next_due_day_offset == 0 else None,
+                foreground=QColor("#1f6b36") if entry.next_due_day_offset == 0 else None,
+            )
+
+        self.balance_queue_table.resizeRowsToContents()
 
     def _preview_day_headers(self, days: int) -> List[str]:
         headers = []
@@ -1230,6 +1329,53 @@ class SchedulerConfigDialog(QDialog):
             font.setBold(True)
             item.setFont(font)
         self.preview_table.setItem(row, column, item)
+
+    def _set_queue_item(
+        self,
+        row: int,
+        column: int,
+        text: str,
+        *,
+        align: Qt.AlignmentFlag,
+        bold: bool = False,
+        background: Optional[QColor] = None,
+        foreground: Optional[QColor] = None,
+        tooltip: Optional[str] = None,
+    ) -> None:
+        item = QTableWidgetItem(text)
+        item.setTextAlignment(int(align))
+        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable & ~Qt.ItemFlag.ItemIsSelectable)
+        if tooltip:
+            item.setToolTip(tooltip)
+        if background is not None:
+            item.setBackground(QBrush(background))
+        if foreground is not None:
+            item.setForeground(QBrush(foreground))
+        if bold:
+            font = item.font()
+            font.setBold(True)
+            item.setFont(font)
+        self.balance_queue_table.setItem(row, column, item)
+
+    def _format_last_seen_offset(self, offset: Optional[int]) -> str:
+        if offset is None:
+            return "Never"
+        if offset == 0:
+            return "Today"
+        if offset == 1:
+            return "Yesterday"
+        target = date.today() - timedelta(days=offset)
+        return f"{offset}d ago ({target.strftime('%b %d')})"
+
+    def _format_next_seen_offset(self, offset: Optional[int]) -> str:
+        if offset is None:
+            return "Not scheduled"
+        if offset == 0:
+            return "Today"
+        if offset == 1:
+            return "Tomorrow"
+        target = date.today() + timedelta(days=offset)
+        return f"In {offset}d ({target.strftime('%b %d')})"
 
     def _sync_rule_stack_height(self) -> None:
         current = self.stack.currentWidget()

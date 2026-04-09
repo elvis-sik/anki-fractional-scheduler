@@ -45,6 +45,15 @@ class IntroductionEvent:
     deck_id: int
 
 
+@dataclass(frozen=True)
+class BalanceFirstQueueEntry:
+    position: int
+    deck_id: int
+    deck_name: str
+    last_introduction_day_offset: Optional[int]
+    next_due_day_offset: Optional[int]
+
+
 def _local_tzinfo():
     return datetime.now().astimezone().tzinfo
 
@@ -526,6 +535,43 @@ def collect_decks(col) -> List[DeckInfo]:
     return _collect_decks(col)
 
 
+def balance_first_queue_snapshot(
+    col,
+    schedule: Dict[str, Any],
+    deck_names: List[str],
+    epoch: str,
+) -> List[BalanceFirstQueueEntry]:
+    if schedule.get("type") != "every_n_days" or _fractional_strategy(schedule) != "balance_first":
+        return []
+
+    scheduled_decks = _decks_for_names(col, deck_names)
+    if not scheduled_decks:
+        return []
+
+    queue_state = _balance_first_queue_state(
+        col,
+        schedule,
+        scheduled_decks,
+        epoch,
+        all_decks=_collect_decks(col),
+    )
+    if queue_state is None:
+        return []
+
+    by_id = {deck.deck_id: deck for deck in scheduled_decks}
+    return [
+        BalanceFirstQueueEntry(
+            position=idx + 1,
+            deck_id=deck_id,
+            deck_name=by_id[deck_id].name,
+            last_introduction_day_offset=queue_state["last_offsets"].get(deck_id),
+            next_due_day_offset=queue_state["next_offsets"].get(deck_id),
+        )
+        for idx, deck_id in enumerate(queue_state["queue_now"])
+        if deck_id in by_id
+    ]
+
+
 def _calendar_state(col, epoch: str) -> Dict[str, int]:
     anki_today_num = anki_today(col)
     rollover_hours = _rollover_hours(col)
@@ -763,26 +809,21 @@ def _preview_balance_first_sequences_by_deck(
     if days <= 0 or not scheduled_decks:
         return {deck.deck_id: [] for deck in scheduled_decks}
 
-    queue = [deck.deck_id for deck in _stable_deck_order(schedule, scheduled_decks)]
-    events_by_deck = _new_introduction_events_by_assigned_deck(
+    queue_state = _balance_first_queue_state_for_day_index(
         col,
-        epoch,
-        all_decks or _collect_decks(col),
+        schedule,
         scheduled_decks,
+        epoch,
         raw_day_index,
+        all_decks=all_decks,
+        include_current_day_events=False,
     )
-    past_events = sorted(
-        [event for events in events_by_deck.values() for event in events],
-        key=lambda event: (event.day_index, event.timestamp_ms, event.deck_id),
-    )
-    for event in past_events:
-        queue = _rotate_deck_to_back(queue, event.deck_id)
-
     budget_pattern = _schedule_daily_budget_pattern(schedule, len(scheduled_decks))
-    if not budget_pattern:
+    if queue_state is None or not budget_pattern:
         return {deck.deck_id: [0] * days for deck in scheduled_decks}
 
     results = {deck.deck_id: [0] * days for deck in scheduled_decks}
+    queue = list(queue_state["queue_now"])
     for offset in range(days):
         budget = budget_pattern[(raw_day_index + offset) % len(budget_pattern)]
         todays_queue = queue[: max(0, budget)]
@@ -791,6 +832,105 @@ def _preview_balance_first_sequences_by_deck(
         queue = _rotate_front_slice_to_back(queue, len(todays_queue))
 
     return results
+
+
+def _balance_first_queue_state(
+    col,
+    schedule: Dict[str, Any],
+    scheduled_decks: List[DeckInfo],
+    epoch: str,
+    *,
+    all_decks: Optional[List[DeckInfo]] = None,
+) -> Optional[Dict[str, Any]]:
+    calendar_state = _calendar_state(col, epoch)
+    return _balance_first_queue_state_for_day_index(
+        col,
+        schedule,
+        scheduled_decks,
+        epoch,
+        calendar_state["day_index"],
+        all_decks=all_decks,
+        include_current_day_events=True,
+    )
+
+
+def _balance_first_queue_state_for_day_index(
+    col,
+    schedule: Dict[str, Any],
+    scheduled_decks: List[DeckInfo],
+    epoch: str,
+    raw_day_index: int,
+    *,
+    all_decks: Optional[List[DeckInfo]] = None,
+    include_current_day_events: bool,
+) -> Optional[Dict[str, Any]]:
+    if not scheduled_decks:
+        return None
+
+    queue_before_today = [deck.deck_id for deck in _stable_deck_order(schedule, scheduled_decks)]
+    history_limit = raw_day_index + 1 if include_current_day_events else raw_day_index
+    events_by_deck = _new_introduction_events_by_assigned_deck(
+        col,
+        epoch,
+        all_decks or _collect_decks(col),
+        scheduled_decks,
+        history_limit,
+    )
+    all_events = sorted(
+        [event for events in events_by_deck.values() for event in events],
+        key=lambda event: (event.day_index, event.timestamp_ms, event.deck_id),
+    )
+
+    past_events = [event for event in all_events if event.day_index < raw_day_index]
+    for event in past_events:
+        queue_before_today = _rotate_deck_to_back(queue_before_today, event.deck_id)
+
+    budget_pattern = _schedule_daily_budget_pattern(schedule, len(scheduled_decks))
+    if not budget_pattern:
+        return {
+            "queue_now": list(queue_before_today),
+            "last_offsets": {},
+            "next_offsets": {deck.deck_id: None for deck in scheduled_decks},
+        }
+
+    today_budget = budget_pattern[raw_day_index % len(budget_pattern)]
+    due_today = queue_before_today[: max(0, today_budget)]
+    today_events = [event for event in all_events if event.day_index == raw_day_index]
+    studied_due_today = {event.deck_id for event in today_events if event.deck_id in due_today}
+
+    queue_now = list(queue_before_today)
+    for event in today_events:
+        queue_now = _rotate_deck_to_back(queue_now, event.deck_id)
+
+    last_offsets: Dict[int, Optional[int]] = {}
+    for deck in scheduled_decks:
+        deck_events = events_by_deck.get(deck.deck_id, [])
+        if not deck_events:
+            last_offsets[deck.deck_id] = None
+            continue
+        last_offsets[deck.deck_id] = max(0, raw_day_index - deck_events[-1].day_index)
+
+    next_offsets: Dict[int, Optional[int]] = {deck.deck_id: None for deck in scheduled_decks}
+    pending_due_today = [deck_id for deck_id in due_today if deck_id not in studied_due_today]
+    for deck_id in due_today:
+        if deck_id not in studied_due_today:
+            next_offsets[deck_id] = 0
+
+    future_queue = _rotate_front_slice_to_back(queue_now, len(pending_due_today))
+    cycle_length = _schedule_cycle_length(schedule)
+    for offset in range(1, cycle_length + 1):
+        budget = budget_pattern[(raw_day_index + offset) % len(budget_pattern)]
+        todays_queue = future_queue[: max(0, budget)]
+        for deck_id in todays_queue:
+            if next_offsets.get(deck_id) is None:
+                next_offsets[deck_id] = offset
+        future_queue = _rotate_front_slice_to_back(future_queue, len(todays_queue))
+
+    return {
+        "queue_now": queue_now,
+        "last_offsets": last_offsets,
+        "next_offsets": next_offsets,
+    }
 
 
 def _schedule_daily_budget_pattern(schedule: Dict[str, Any], deck_count: int) -> List[int]:
