@@ -729,33 +729,19 @@ def _new_introduction_events_by_assigned_deck(
     if start_day_index is not None:
         start_day = epoch_day + int(start_day_index)
         start_ms = int(((start_day * 86400) + (rollover_hours * 3600)) * 1000)
-    end_day = epoch_day + raw_day_index
-    end_ms = int(((end_day * 86400) + (rollover_hours * 3600)) * 1000)
-
     ordered_source_ids = sorted(relevant_source_ids)
     placeholders = ",".join("?" for _ in ordered_source_ids)
-    lower_bound_clause = "  and r.id >= ?\n" if start_ms is not None else ""
     sql = f"""
-select r.id,
+select min(r.id) as first_review_id,
        case when c.odid = 0 then c.did else c.odid end as original_did
 from revlog as r
 join cards as c on c.id = r.cid
 where (case when c.odid = 0 then c.did else c.odid end) in ({placeholders})
-{lower_bound_clause}  and r.id < ?
-  and not exists (
-      select 1
-      from revlog as older
-      where older.cid = r.cid
-        and older.id < r.id
-  )
+group by r.cid, original_did
 """
 
     try:
-        args: List[Any] = list(ordered_source_ids)
-        if start_ms is not None:
-            args.append(start_ms)
-        args.append(end_ms)
-        rows = col.db.all(sql, *args)
+        rows = col.db.all(sql, *ordered_source_ids)
     except Exception:
         return {}
 
@@ -767,6 +753,8 @@ where (case when c.odid = 0 then c.did else c.odid end) in ({placeholders})
             source_deck_id = int(source_did)
             timestamp_ms = int(revlog_id)
         except Exception:
+            continue
+        if start_ms is not None and timestamp_ms < start_ms:
             continue
         if day_index >= raw_day_index:
             continue
