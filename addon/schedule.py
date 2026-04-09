@@ -725,22 +725,26 @@ def _new_introduction_events_by_assigned_deck(
     end_day = epoch_day + raw_day_index
     end_ms = int(((end_day * 86400) + (rollover_hours * 3600)) * 1000)
 
-    placeholders = ",".join("?" for _ in sorted(relevant_source_ids))
+    ordered_source_ids = sorted(relevant_source_ids)
+    placeholders = ",".join("?" for _ in ordered_source_ids)
     sql = f"""
 select r.id,
        case when c.odid = 0 then c.did else c.odid end as original_did
 from revlog as r
 join cards as c on c.id = r.cid
-where r.id >= ?
+where (case when c.odid = 0 then c.did else c.odid end) in ({placeholders})
+  and r.id >= ?
   and r.id < ?
-  and r.ease > 0
-  and r.type = 0
-  and r.lastIvl = 0
-  and (case when c.odid = 0 then c.did else c.odid end) in ({placeholders})
+  and not exists (
+      select 1
+      from revlog as older
+      where older.cid = r.cid
+        and older.id < r.id
+  )
 """
 
     try:
-        rows = col.db.all(sql, start_ms, end_ms, *sorted(relevant_source_ids))
+        rows = col.db.all(sql, *ordered_source_ids, start_ms, end_ms)
     except Exception:
         return {}
 

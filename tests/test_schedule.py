@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import sys
 import unittest
 from pathlib import Path
@@ -31,6 +32,35 @@ class FakeBalanceCol:
 
     def all(self, _sql: str, *_args):
         return list(self._rows)
+
+    def all_names_and_ids(self):
+        return [{"name": item.name, "id": item.deck_id} for item in self._decks]
+
+    def get(self, deck_id: int):
+        return {
+            "id": deck_id,
+            "name": next(item.name for item in self._decks if item.deck_id == deck_id),
+            "dyn": False,
+        }
+
+
+class SqliteAllWrapper:
+    def __init__(self) -> None:
+        self._conn = sqlite3.connect(":memory:")
+        self._conn.execute("create table cards (id integer primary key, did integer, odid integer)")
+        self._conn.execute("create table revlog (id integer primary key, cid integer)")
+
+    def all(self, sql: str, *args):
+        return list(self._conn.execute(sql, args))
+
+
+class FakeSqliteBalanceCol:
+    def __init__(self, decks: list[schedule.DeckInfo], *, today: int) -> None:
+        self.conf = {"rollover": 4}
+        self.db = SqliteAllWrapper()
+        self.sched = type("Sched", (), {"today": today})()
+        self.decks = self
+        self._decks = decks
 
     def all_names_and_ids(self):
         return [{"name": item.name, "id": item.deck_id} for item in self._decks]
@@ -346,6 +376,40 @@ class DailyBudgetPatternTests(unittest.TestCase):
         self.assertEqual([entry.next_due_day_offset for entry in snapshot[:2]], [0, 0])
         self.assertEqual([entry.next_due_day_offset for entry in snapshot[2:]], [1, 1])
         self.assertEqual([entry.last_introduction_day_offset for entry in snapshot], [None] * 4)
+
+    def test_introduction_history_query_runs_against_real_sqlite(self) -> None:
+        sched = {
+            "id": "group",
+            "type": "every_n_days",
+            "m": 1,
+            "n": 2,
+            "fractional_strategy": "balance_first",
+        }
+        decks = [deck(1, "A"), deck(2, "B")]
+        col = FakeSqliteBalanceCol(decks, today=anki_today_for_day_index(1))
+        col.db._conn.executemany(
+            "insert into cards(id, did, odid) values (?, ?, ?)",
+            [
+                (101, 1, 0),
+                (202, 2, 0),
+            ],
+        )
+        col.db._conn.executemany(
+            "insert into revlog(id, cid) values (?, ?)",
+            [
+                (revlog_id_for_day_index(0), 101),
+                (revlog_id_for_day_index(1), 202),
+            ],
+        )
+
+        snapshot = schedule.balance_first_queue_snapshot(
+            col,
+            sched,
+            [item.name for item in decks],
+            "2026-01-01",
+        )
+
+        self.assertEqual([entry.last_introduction_day_offset for entry in snapshot], [1, 0])
 
 
 class FeatureAssignmentTests(unittest.TestCase):
