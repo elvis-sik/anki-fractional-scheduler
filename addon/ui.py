@@ -138,9 +138,10 @@ def _normalized_config_dict(raw: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 class SchedulerConfigDialog(QDialog):
-    def __init__(self, module: str, parent=None) -> None:
+    def __init__(self, module: str, parent=None, apply_callback=None) -> None:
         super().__init__(parent)
         self.module = module
+        self.apply_callback = apply_callback
         self.setWindowTitle("Fractional Scheduler Config")
         self.resize(920, 560)
 
@@ -431,9 +432,16 @@ class SchedulerConfigDialog(QDialog):
 
         # Buttons
         buttons = QHBoxLayout()
+        self.apply_now_status = QLabel("")
+        self.apply_now_status.setStyleSheet("color: palette(mid);")
+        self.apply_now_btn = QPushButton("Apply Now")
+        self.apply_now_btn.setToolTip("Recompute and apply today-only limits immediately.")
+        self.apply_now_btn.clicked.connect(self._apply_now)
         self.close_btn = QPushButton("Close")
         self.close_btn.setDefault(True)
         self.close_btn.clicked.connect(self._close_dialog)
+        buttons.addWidget(self.apply_now_status, 1)
+        buttons.addWidget(self.apply_now_btn)
         buttons.addWidget(self.close_btn)
 
         right.addWidget(self.tabs, 1)
@@ -988,6 +996,23 @@ class SchedulerConfigDialog(QDialog):
         self._commit_current()
         self._persist_config()
         self.accept()
+
+    def _apply_now(self) -> None:
+        self._commit_current()
+        self._persist_config()
+        if self.apply_callback is None:
+            self.apply_now_status.setText("Manual apply is unavailable.")
+            return
+        try:
+            applied, total, dry_run = self.apply_callback()
+        except Exception:
+            self.apply_now_status.setText("Manual apply failed.")
+            return
+        if dry_run:
+            self.apply_now_status.setText(f"Dry run: computed {total} limits.")
+            return
+        self.apply_now_status.setText(f"Applied {applied}/{total} limits.")
+        self._refresh_preview()
 
     def reject(self) -> None:
         self._commit_current()
