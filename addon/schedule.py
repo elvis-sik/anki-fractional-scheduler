@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import fnmatch
 import hashlib
-import json
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from pathlib import Path
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 VALID_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -14,7 +12,6 @@ FEATURE_FRACTIONAL = "fractional_enabled"
 FEATURE_NOTIFY = "notify_enabled"
 DEFAULT_FRACTIONAL_STRATEGY = "fraction_first"
 _LAST_BALANCE_FIRST_DEBUG: Dict[str, Any] = {}
-_BALANCE_FIRST_DEBUG_LOG_PATH = Path("/tmp/fractional-scheduler-debug.log")
 
 
 @dataclass(frozen=True)
@@ -100,6 +97,15 @@ def anki_day_number_from_date_str(date_str: str, rollover_hours: int) -> int:
     del rollover_hours
     year, month, day = [int(x) for x in date_str.split("-")]
     return datetime(year, month, day).date().toordinal()
+
+
+def _anki_day_start_timestamp(day_number: int, rollover_hours: int) -> float:
+    local_dt = datetime.combine(
+        date.fromordinal(day_number),
+        datetime.min.time(),
+        tzinfo=_local_tzinfo(),
+    ).replace(hour=rollover_hours)
+    return local_dt.timestamp()
 
 
 def bresenham_pattern(m: int, n: int) -> List[int]:
@@ -552,45 +558,10 @@ def collect_decks(col) -> List[DeckInfo]:
     return _collect_decks(col)
 
 
-def last_balance_first_debug_summary() -> str:
-    debug = dict(_LAST_BALANCE_FIRST_DEBUG)
-    if not debug:
-        return ""
-    parts = []
-    path = debug.get("history_path")
-    if path:
-        parts.append(f"path={path}")
-    if "candidate_cards" in debug:
-        parts.append(f"cards={debug['candidate_cards']}")
-    if "first_reviews" in debug:
-        parts.append(f"first_reviews={debug['first_reviews']}")
-    if "backend_cards_checked" in debug:
-        parts.append(f"backend_cards={debug['backend_cards_checked']}")
-    if "decks_with_last_new" in debug and "deck_count" in debug:
-        parts.append(f"last_new={debug['decks_with_last_new']}/{debug['deck_count']}")
-    parts.append(f"log={_BALANCE_FIRST_DEBUG_LOG_PATH}")
-    return "Debug: " + ", ".join(parts)
-
-
-def _write_balance_first_debug_log(event: str, payload: Dict[str, Any]) -> None:
-    try:
-        record = {
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
-            "event": event,
-            "payload": payload,
-        }
-        with _BALANCE_FIRST_DEBUG_LOG_PATH.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, sort_keys=True, default=str))
-            handle.write("\n")
-    except Exception:
-        pass
-
-
 def _set_last_balance_first_debug(debug: Dict[str, Any], *, event: Optional[str] = None) -> None:
     global _LAST_BALANCE_FIRST_DEBUG
     _LAST_BALANCE_FIRST_DEBUG = dict(debug)
-    if event is not None:
-        _write_balance_first_debug_log(event, _LAST_BALANCE_FIRST_DEBUG)
+    del event
 
 
 def balance_first_queue_snapshot(
@@ -599,15 +570,6 @@ def balance_first_queue_snapshot(
     deck_names: List[str],
     epoch: str,
 ) -> List[BalanceFirstQueueEntry]:
-    _write_balance_first_debug_log(
-        "queue_snapshot_start",
-        {
-            "schedule_id": schedule.get("id"),
-            "epoch": epoch,
-            "deck_count": len(deck_names),
-            "deck_names_sample": deck_names[:10],
-        },
-    )
     if schedule.get("type") != "every_n_days" or _fractional_strategy(schedule) != "balance_first":
         return []
 
@@ -644,8 +606,7 @@ def _calendar_state(col, epoch: str) -> Dict[str, int]:
     rollover_hours = _rollover_hours(col)
     epoch_day = anki_day_number_from_date_str(epoch, rollover_hours)
     day_index = anki_today_num - epoch_day
-    day_start_ts = (anki_today_num * 86400) + (rollover_hours * 3600)
-    weekday_idx = datetime.fromtimestamp(day_start_ts, tz=_local_tzinfo()).weekday()
+    weekday_idx = date.fromordinal(anki_today_num).weekday()
     return {
         "day_index": day_index,
         "weekday_idx": weekday_idx,
@@ -806,7 +767,7 @@ def _new_introduction_events_by_assigned_deck(
     start_ms: Optional[int] = None
     if start_day_index is not None:
         start_day = epoch_day + int(start_day_index)
-        start_ms = int(((start_day * 86400) + (rollover_hours * 3600)) * 1000)
+        start_ms = int(_anki_day_start_timestamp(start_day, rollover_hours) * 1000)
     ordered_source_ids = sorted(relevant_source_ids)
     placeholders = ",".join("?" for _ in ordered_source_ids)
     debug["relevant_source_ids"] = len(ordered_source_ids)
@@ -842,7 +803,6 @@ where did in ({placeholders}) or odid in ({placeholders})
 
     debug["candidate_cards"] = len(card_sources)
     debug["candidate_card_sample"] = sorted(card_sources.items())[:12]
-    _write_balance_first_debug_log("history_candidate_cards", debug)
     if not card_sources:
         introduced = _introduction_events_via_backend_card_stats(
             col,

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from .api import FractionalSchedulerAPI
 from .apply import apply_limits
 from .config import load_config, save_config
@@ -17,12 +19,20 @@ except Exception:  # pragma: no cover
 
 
 LAST_APPLIED_DAY_CONFIG_KEY = "fractional_scheduler.last_applied_day"
+LEGACY_DEBUG_LOG_PATH = Path("/tmp/fractional-scheduler-debug.log")
 
 
 def _log(message: str) -> None:
     if mw is None:
         return
     print(f"[FractionalScheduler] {message}")
+
+
+def _cleanup_legacy_debug_log() -> None:
+    try:
+        LEGACY_DEBUG_LOG_PATH.unlink(missing_ok=True)
+    except Exception:
+        pass
 
 
 def _register_api_service() -> None:
@@ -91,6 +101,7 @@ def _apply(col, source: str) -> tuple[int, int, bool]:
 def _on_profile_open() -> None:
     if mw is None or mw.col is None:
         return
+    _cleanup_legacy_debug_log()
     _register_api_service()
     config = load_config(__name__)
     if not config.defaults.get("apply_on_profile_open", True):
@@ -101,6 +112,7 @@ def _on_profile_open() -> None:
 
 
 def _on_collection_open(col) -> None:
+    _cleanup_legacy_debug_log()
     config = load_config(__name__)
     if not config.defaults.get("apply_on_collection_open", True):
         return

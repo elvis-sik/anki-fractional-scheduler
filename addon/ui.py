@@ -41,7 +41,6 @@ from .schedule import (
     FEATURE_NOTIFY,
     balance_first_queue_snapshot,
     filter_deck_names_for_schedule,
-    last_balance_first_debug_summary,
     match_deck_names,
     match_deck_names_for_feature,
     preview_schedule,
@@ -483,6 +482,7 @@ class SchedulerConfigDialog(QDialog):
         layout = QFormLayout(w)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
+        layout.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         layout.setFormAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
@@ -514,7 +514,7 @@ class SchedulerConfigDialog(QDialog):
         layout.addRow(m_label, self.m_spin)
         layout.addRow(n_label, self.n_spin)
         layout.addRow(strategy_label, self.fractional_strategy_combo)
-        layout.addRow("", self.fractional_strategy_help)
+        layout.addRow(self.fractional_strategy_help)
         self.every_stagger_label = QLabel("Stagger")
         self.every_stagger_label.setToolTip(
             "Spread decks across days so they don't all introduce cards on the same day."
@@ -524,7 +524,7 @@ class SchedulerConfigDialog(QDialog):
         self.stagger_help.setWordWrap(True)
         self.stagger_help.setStyleSheet("color: palette(mid);")
         layout.addRow(self.every_stagger_label, self.stagger_mode)
-        layout.addRow("", self.stagger_help)
+        layout.addRow(self.stagger_help)
 
         self.m_spin.editingFinished.connect(self._refresh_preview)
         self.n_spin.editingFinished.connect(self._refresh_preview)
@@ -1247,9 +1247,6 @@ class SchedulerConfigDialog(QDialog):
             f"{len(queue_entries)} decks in queue order. {due_today} currently due. "
             "Next New assumes currently pending decks are studied when offered."
         )
-        debug_summary = last_balance_first_debug_summary()
-        if debug_summary:
-            summary = f"{summary} {debug_summary}"
         self.balance_queue_summary.setText(summary)
 
         for row, entry in enumerate(queue_entries):
@@ -1433,7 +1430,13 @@ class SchedulerConfigDialog(QDialog):
             return
         current.adjustSize()
         layout = current.layout()
-        content_height = layout.sizeHint().height() if layout is not None else current.sizeHint().height()
+        content_height = current.sizeHint().height()
+        if layout is not None:
+            if layout.hasHeightForWidth():
+                content_width = max(320, self.stack.width() or current.width() or layout.sizeHint().width())
+                content_height = layout.totalHeightForWidth(content_width)
+            else:
+                content_height = layout.sizeHint().height()
         self.stack.setFixedHeight(content_height)
         self.rule_box.setFixedHeight(content_height + 38)
 
