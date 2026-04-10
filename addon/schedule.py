@@ -732,17 +732,22 @@ def _new_introduction_events_by_assigned_deck(
     ordered_source_ids = sorted(relevant_source_ids)
     placeholders = ",".join("?" for _ in ordered_source_ids)
     sql = f"""
-select min(r.id) as first_review_id,
+select first_reviews.first_review_id,
        case when c.odid = 0 then c.did else c.odid end as original_did
-from revlog as r
-join cards as c on c.id = r.cid
+from cards as c
+join (
+    select cid, min(id) as first_review_id
+    from revlog
+    where ease != 0
+    group by cid
+) as first_reviews on first_reviews.cid = c.id
 where (case when c.odid = 0 then c.did else c.odid end) in ({placeholders})
-group by r.cid, original_did
 """
 
     try:
         rows = col.db.all(sql, *ordered_source_ids)
-    except Exception:
+    except Exception as exc:
+        print(f"fractional scheduler: failed to query introduction history: {exc}")
         return {}
 
     introduced: Dict[int, List[IntroductionEvent]] = {}

@@ -48,7 +48,9 @@ class SqliteAllWrapper:
     def __init__(self) -> None:
         self._conn = sqlite3.connect(":memory:")
         self._conn.execute("create table cards (id integer primary key, did integer, odid integer)")
-        self._conn.execute("create table revlog (id integer primary key, cid integer)")
+        self._conn.execute(
+            "create table revlog (id integer primary key, cid integer, ease integer default 1)"
+        )
 
     def all(self, sql: str, *args):
         return list(self._conn.execute(sql, args))
@@ -395,10 +397,10 @@ class DailyBudgetPatternTests(unittest.TestCase):
             ],
         )
         col.db._conn.executemany(
-            "insert into revlog(id, cid) values (?, ?)",
+            "insert into revlog(id, cid, ease) values (?, ?, ?)",
             [
-                (revlog_id_for_day_index(0), 101),
-                (revlog_id_for_day_index(1), 202),
+                (revlog_id_for_day_index(0), 101, 3),
+                (revlog_id_for_day_index(1), 202, 3),
             ],
         )
 
@@ -426,8 +428,8 @@ class DailyBudgetPatternTests(unittest.TestCase):
             (101, 1, 0),
         )
         col.db._conn.execute(
-            "insert into revlog(id, cid) values (?, ?)",
-            (revlog_id_for_day_index(-2), 101),
+            "insert into revlog(id, cid, ease) values (?, ?, ?)",
+            (revlog_id_for_day_index(-2), 101, 3),
         )
 
         snapshot = schedule.balance_first_queue_snapshot(
@@ -438,6 +440,37 @@ class DailyBudgetPatternTests(unittest.TestCase):
         )
 
         self.assertEqual([entry.last_introduction_day_offset for entry in snapshot], [3])
+
+    def test_introduction_history_ignores_manual_reschedules(self) -> None:
+        sched = {
+            "id": "group",
+            "type": "every_n_days",
+            "m": 1,
+            "n": 2,
+            "fractional_strategy": "balance_first",
+        }
+        decks = [deck(1, "A")]
+        col = FakeSqliteBalanceCol(decks, today=anki_today_for_day_index(1))
+        col.db._conn.execute(
+            "insert into cards(id, did, odid) values (?, ?, ?)",
+            (101, 1, 0),
+        )
+        col.db._conn.executemany(
+            "insert into revlog(id, cid, ease) values (?, ?, ?)",
+            [
+                (revlog_id_for_day_index(0), 101, 0),
+                (revlog_id_for_day_index(1), 101, 3),
+            ],
+        )
+
+        snapshot = schedule.balance_first_queue_snapshot(
+            col,
+            sched,
+            [item.name for item in decks],
+            "2026-01-01",
+        )
+
+        self.assertEqual([entry.last_introduction_day_offset for entry in snapshot], [0])
 
 
 class FeatureAssignmentTests(unittest.TestCase):
