@@ -75,6 +75,12 @@ def anki_day_number_from_timestamp(ts: float, rollover_hours: int) -> int:
 
 
 def anki_today(col) -> int:
+    if hasattr(col, "sched") and hasattr(col.sched, "day_cutoff"):
+        try:
+            # day_cutoff is the next rollover timestamp on an absolute Unix basis.
+            return anki_day_number_from_timestamp(float(col.sched.day_cutoff) - 1, _rollover_hours(col))
+        except Exception:
+            pass
     if hasattr(col, "sched") and hasattr(col.sched, "today"):
         try:
             return int(col.sched.today)

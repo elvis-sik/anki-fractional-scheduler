@@ -110,6 +110,35 @@ def anki_today_for_day_index(day_index: int, *, epoch: str = "2026-01-01", rollo
     return schedule.anki_day_number_from_date_str(epoch, rollover) + day_index
 
 
+class AnkiTodayTests(unittest.TestCase):
+    def test_anki_today_prefers_absolute_day_cutoff_over_relative_sched_today(self) -> None:
+        rollover = 4
+        expected_day_number = schedule.anki_day_number_from_date_str("2026-04-10", rollover)
+        day_cutoff = ((expected_day_number + 1) * 86400) + (rollover * 3600)
+        col = type(
+            "Col",
+            (),
+            {
+                "conf": {"rollover": rollover},
+                "sched": type("Sched", (), {"today": 5, "day_cutoff": day_cutoff})(),
+            },
+        )()
+
+        self.assertEqual(schedule.anki_today(col), expected_day_number)
+
+    def test_anki_today_falls_back_to_sched_today_without_day_cutoff(self) -> None:
+        col = type(
+            "Col",
+            (),
+            {
+                "conf": {"rollover": 4},
+                "sched": type("Sched", (), {"today": 12})(),
+            },
+        )()
+
+        self.assertEqual(schedule.anki_today(col), 12)
+
+
 class ShiftedEveryNDaysIndexTests(unittest.TestCase):
     def test_skipped_positive_day_shifts_next_release_forward(self) -> None:
         sched = {"type": "every_n_days", "m": 1, "n": 7}
