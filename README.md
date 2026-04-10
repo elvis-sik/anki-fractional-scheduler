@@ -110,3 +110,10 @@ The service only includes matched, non-dynamic decks that survive `leaf_only` fi
 - `Rebalance Offsets` updates stored stagger assignments and preview data; deck limits change on the next apply.
 - Notify badges are configured per schedule inside the main Fractional Scheduler dialog.
 - `addon/meta.json` is local Anki state and is intentionally not tracked in git.
+
+## Debug Logging
+- Debug logging is off by default and no queue/history diagnostics are shown in the UI.
+- To enable temporary scheduler diagnostics before Anki loads the add-on, start Anki with the environment variable `FRACTIONAL_SCHEDULER_DEBUG=1`.
+- When enabled, the add-on appends JSON lines to `/tmp/fractional-scheduler-debug.log`.
+- The log may include deck names, schedule ids, queue order, and introduction-history details, so treat it as potentially sensitive and delete it when you are done.
+- When debug logging is not enabled, the add-on removes any old `/tmp/fractional-scheduler-debug.log` on profile/collection open.

@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import fnmatch
 import hashlib
+import json
+import os
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 VALID_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -12,6 +15,8 @@ FEATURE_FRACTIONAL = "fractional_enabled"
 FEATURE_NOTIFY = "notify_enabled"
 DEFAULT_FRACTIONAL_STRATEGY = "fraction_first"
 _LAST_BALANCE_FIRST_DEBUG: Dict[str, Any] = {}
+DEBUG_LOG_ENV_VAR = "FRACTIONAL_SCHEDULER_DEBUG"
+DEBUG_LOG_PATH = Path("/tmp/fractional-scheduler-debug.log")
 
 
 @dataclass(frozen=True)
@@ -106,6 +111,27 @@ def _anki_day_start_timestamp(day_number: int, rollover_hours: int) -> float:
         tzinfo=_local_tzinfo(),
     ).replace(hour=rollover_hours)
     return local_dt.timestamp()
+
+
+def debug_logging_enabled() -> bool:
+    value = str(os.environ.get(DEBUG_LOG_ENV_VAR, "")).strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _write_debug_log(event: str, payload: Dict[str, Any]) -> None:
+    if not debug_logging_enabled():
+        return
+    try:
+        record = {
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "event": event,
+            "payload": payload,
+        }
+        with DEBUG_LOG_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, sort_keys=True, default=str))
+            handle.write("\n")
+    except Exception:
+        pass
 
 
 def bresenham_pattern(m: int, n: int) -> List[int]:
@@ -205,8 +231,7 @@ def preview_schedule(
     epoch_day = anki_day_number_from_date_str(epoch, rollover_hours)
     day_index = anki_today_num - epoch_day
 
-    day_start_ts = (anki_today_num * 86400) + (rollover_hours * 3600)
-    weekday_idx = datetime.fromtimestamp(day_start_ts, tz=_local_tzinfo()).weekday()
+    weekday_idx = date.fromordinal(anki_today_num).weekday()
     preview_decks = _decks_for_names(col, deck_names)
 
     if schedule["type"] == "every_n_days":
@@ -561,7 +586,8 @@ def collect_decks(col) -> List[DeckInfo]:
 def _set_last_balance_first_debug(debug: Dict[str, Any], *, event: Optional[str] = None) -> None:
     global _LAST_BALANCE_FIRST_DEBUG
     _LAST_BALANCE_FIRST_DEBUG = dict(debug)
-    del event
+    if event is not None:
+        _write_debug_log(event, _LAST_BALANCE_FIRST_DEBUG)
 
 
 def balance_first_queue_snapshot(
@@ -570,6 +596,15 @@ def balance_first_queue_snapshot(
     deck_names: List[str],
     epoch: str,
 ) -> List[BalanceFirstQueueEntry]:
+    _write_debug_log(
+        "queue_snapshot_start",
+        {
+            "schedule_id": schedule.get("id"),
+            "epoch": epoch,
+            "deck_count": len(deck_names),
+            "deck_names_sample": deck_names[:10],
+        },
+    )
     if schedule.get("type") != "every_n_days" or _fractional_strategy(schedule) != "balance_first":
         return []
 
@@ -803,6 +838,7 @@ where did in ({placeholders}) or odid in ({placeholders})
 
     debug["candidate_cards"] = len(card_sources)
     debug["candidate_card_sample"] = sorted(card_sources.items())[:12]
+    _write_debug_log("history_candidate_cards", debug)
     if not card_sources:
         introduced = _introduction_events_via_backend_card_stats(
             col,

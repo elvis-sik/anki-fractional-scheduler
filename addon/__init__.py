@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from .api import FractionalSchedulerAPI
 from .apply import apply_limits
 from .config import load_config, save_config
 from .notify import decorate_deck_browser
-from .schedule import compute_deck_limits
+from .schedule import DEBUG_LOG_PATH, compute_deck_limits, debug_logging_enabled
 from .ui import SchedulerConfigDialog
 
 try:
@@ -19,9 +17,6 @@ except Exception:  # pragma: no cover
 
 
 LAST_APPLIED_DAY_CONFIG_KEY = "fractional_scheduler.last_applied_day"
-LEGACY_DEBUG_LOG_PATH = Path("/tmp/fractional-scheduler-debug.log")
-
-
 def _log(message: str) -> None:
     if mw is None:
         return
@@ -29,8 +24,10 @@ def _log(message: str) -> None:
 
 
 def _cleanup_legacy_debug_log() -> None:
+    if debug_logging_enabled():
+        return
     try:
-        LEGACY_DEBUG_LOG_PATH.unlink(missing_ok=True)
+        DEBUG_LOG_PATH.unlink(missing_ok=True)
     except Exception:
         pass
 
