@@ -41,6 +41,7 @@ from .schedule import (
     FEATURE_NOTIFY,
     balance_first_queue_snapshot,
     filter_deck_names_for_schedule,
+    last_balance_first_debug_summary,
     match_deck_names,
     match_deck_names_for_feature,
     preview_schedule,
@@ -1242,10 +1243,14 @@ class SchedulerConfigDialog(QDialog):
         self.balance_queue_table.setColumnWidth(3, 140)
 
         due_today = sum(1 for entry in queue_entries if getattr(entry, "next_due_day_offset", None) == 0)
-        self.balance_queue_summary.setText(
+        summary = (
             f"{len(queue_entries)} decks in queue order. {due_today} currently due. "
             "Next New assumes currently pending decks are studied when offered."
         )
+        debug_summary = last_balance_first_debug_summary()
+        if debug_summary:
+            summary = f"{summary} {debug_summary}"
+        self.balance_queue_summary.setText(summary)
 
         for row, entry in enumerate(queue_entries):
             self._set_queue_item(

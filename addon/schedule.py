@@ -11,6 +11,7 @@ VALID_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 FEATURE_FRACTIONAL = "fractional_enabled"
 FEATURE_NOTIFY = "notify_enabled"
 DEFAULT_FRACTIONAL_STRATEGY = "fraction_first"
+_LAST_BALANCE_FIRST_DEBUG: Dict[str, Any] = {}
 
 
 @dataclass(frozen=True)
@@ -535,6 +536,25 @@ def collect_decks(col) -> List[DeckInfo]:
     return _collect_decks(col)
 
 
+def last_balance_first_debug_summary() -> str:
+    debug = dict(_LAST_BALANCE_FIRST_DEBUG)
+    if not debug:
+        return ""
+    parts = []
+    path = debug.get("history_path")
+    if path:
+        parts.append(f"path={path}")
+    if "candidate_cards" in debug:
+        parts.append(f"cards={debug['candidate_cards']}")
+    if "first_reviews" in debug:
+        parts.append(f"first_reviews={debug['first_reviews']}")
+    if "backend_cards_checked" in debug:
+        parts.append(f"backend_cards={debug['backend_cards_checked']}")
+    if "decks_with_last_new" in debug and "deck_count" in debug:
+        parts.append(f"last_new={debug['decks_with_last_new']}/{debug['deck_count']}")
+    return "Debug: " + ", ".join(parts)
+
+
 def balance_first_queue_snapshot(
     col,
     schedule: Dict[str, Any],
@@ -707,6 +727,7 @@ def _new_introduction_events_by_assigned_deck(
     start_day_index: Optional[int] = 0,
     allow_pre_epoch_events: bool = False,
 ) -> Dict[int, List[IntroductionEvent]]:
+    global _LAST_BALANCE_FIRST_DEBUG
     if raw_day_index <= 0 or not scheduled_decks:
         return {}
 
@@ -731,6 +752,12 @@ def _new_introduction_events_by_assigned_deck(
         start_ms = int(((start_day * 86400) + (rollover_hours * 3600)) * 1000)
     ordered_source_ids = sorted(relevant_source_ids)
     placeholders = ",".join("?" for _ in ordered_source_ids)
+    debug: Dict[str, Any] = {
+        "history_path": "sql",
+        "candidate_cards": 0,
+        "first_reviews": 0,
+        "backend_cards_checked": 0,
+    }
     cards_sql = f"""
 select id, did, odid
 from cards
@@ -741,6 +768,12 @@ where did in ({placeholders}) or odid in ({placeholders})
         card_rows = col.db.all(cards_sql, *ordered_source_ids, *ordered_source_ids)
     except Exception as exc:
         print(f"fractional scheduler: failed to query candidate cards: {exc}")
+        _LAST_BALANCE_FIRST_DEBUG = {
+            "history_path": "sql_error",
+            "candidate_cards": 0,
+            "first_reviews": 0,
+            "backend_cards_checked": 0,
+        }
         return {}
 
     card_sources: Dict[int, int] = {}
@@ -754,6 +787,7 @@ where did in ({placeholders}) or odid in ({placeholders})
             continue
         card_sources[card_id_int] = source_deck_id
 
+    debug["candidate_cards"] = len(card_sources)
     if not card_sources:
         introduced = _introduction_events_via_backend_card_stats(
             col,
@@ -764,12 +798,14 @@ where did in ({placeholders}) or odid in ({placeholders})
             raw_day_index,
             start_ms=start_ms,
             allow_pre_epoch_events=allow_pre_epoch_events,
+            debug=debug,
         )
         for target_deck_id in list(introduced.keys()):
             introduced[target_deck_id] = sorted(
                 introduced[target_deck_id],
                 key=lambda event: (event.day_index, event.timestamp_ms, event.deck_id),
             )
+        _LAST_BALANCE_FIRST_DEBUG = debug
         return introduced
 
     first_review_by_card: Dict[int, int] = {}
@@ -788,6 +824,12 @@ group by cid
             revlog_rows = col.db.all(revlog_sql, *chunk)
         except Exception as exc:
             print(f"fractional scheduler: failed to query introduction revlog chunk: {exc}")
+            _LAST_BALANCE_FIRST_DEBUG = {
+                "history_path": "revlog_error",
+                "candidate_cards": len(card_sources),
+                "first_reviews": len(first_review_by_card),
+                "backend_cards_checked": 0,
+            }
             return {}
         for card_id, revlog_id in revlog_rows:
             try:
@@ -795,6 +837,7 @@ group by cid
             except Exception:
                 continue
 
+    debug["first_reviews"] = len(first_review_by_card)
     introduced = _introduction_events_from_first_reviews(
         first_review_by_card,
         card_sources,
@@ -807,6 +850,7 @@ group by cid
     )
 
     if not introduced:
+        debug["history_path"] = "backend"
         introduced = _introduction_events_via_backend_card_stats(
             col,
             relevant_source_ids,
@@ -816,8 +860,10 @@ group by cid
             raw_day_index,
             start_ms=start_ms,
             allow_pre_epoch_events=allow_pre_epoch_events,
+            debug=debug,
         )
 
+    _LAST_BALANCE_FIRST_DEBUG = debug
     for target_deck_id in list(introduced.keys()):
         introduced[target_deck_id] = sorted(
             introduced[target_deck_id],
@@ -873,6 +919,7 @@ def _introduction_events_via_backend_card_stats(
     *,
     start_ms: Optional[int],
     allow_pre_epoch_events: bool,
+    debug: Optional[Dict[str, Any]] = None,
 ) -> Dict[int, List[IntroductionEvent]]:
     decks = getattr(col, "decks", None)
     card_stats_data = getattr(col, "card_stats_data", None)
@@ -897,6 +944,8 @@ def _introduction_events_via_backend_card_stats(
             if card_id_int in seen_cards:
                 continue
             seen_cards.add(card_id_int)
+            if debug is not None:
+                debug["backend_cards_checked"] = int(debug.get("backend_cards_checked", 0)) + 1
             try:
                 stats = card_stats_data(card_id_int)
             except Exception:
@@ -1050,6 +1099,11 @@ def _balance_first_queue_state_for_day_index(
             "queue_now": list(queue_before_today),
             "last_offsets": {},
             "next_offsets": {deck.deck_id: None for deck in scheduled_decks},
+            "debug": {
+                "history_path": "none",
+                "deck_count": len(scheduled_decks),
+                "decks_with_last_new": 0,
+            },
         }
 
     today_budget = budget_pattern[raw_day_index % len(budget_pattern)]
@@ -1085,10 +1139,16 @@ def _balance_first_queue_state_for_day_index(
                 next_offsets[deck_id] = offset
         future_queue = _rotate_front_slice_to_back(future_queue, len(todays_queue))
 
+    debug = dict(_LAST_BALANCE_FIRST_DEBUG)
+    debug["deck_count"] = len(scheduled_decks)
+    debug["decks_with_last_new"] = sum(1 for value in last_offsets.values() if value is not None)
+    _LAST_BALANCE_FIRST_DEBUG.update(debug)
+
     return {
         "queue_now": queue_now,
         "last_offsets": last_offsets,
         "next_offsets": next_offsets,
+        "debug": debug,
     }
 
 
