@@ -334,8 +334,8 @@ class DailyBudgetPatternTests(unittest.TestCase):
             decks,
             today=anki_today_for_day_index(1),
             rows=[
-                (revlog_id_for_day_index(0), day0_deck),
-                (revlog_id_for_day_index(1), day1_deck),
+                (1001, revlog_id_for_day_index(0), day0_deck, 0),
+                (1002, revlog_id_for_day_index(1), day1_deck, 0),
             ],
         )
 
