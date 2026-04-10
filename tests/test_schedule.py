@@ -381,6 +381,102 @@ class DailyBudgetPatternTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(sum(first[0]), 1)
 
+    def test_hash_strategy_ignores_introduction_history(self) -> None:
+        sched = {
+            "id": "hashy",
+            "type": "every_n_days",
+            "m": 1,
+            "n": 7,
+            "fractional_strategy": "hash",
+        }
+        decks = [deck(1, "A"), deck(2, "B")]
+        today = anki_today_for_day_index(8)
+        plain_col = FakeBalanceCol(decks, today=today)
+        history_col = FakeBalanceCol(
+            decks,
+            today=today,
+            card_rows=[
+                (101, 1, 0),
+                (202, 2, 0),
+            ],
+            revlog_rows=[
+                (101, revlog_id_for_day_index(0)),
+                (202, revlog_id_for_day_index(7)),
+            ],
+        )
+
+        plain = schedule._preview_every_n_days_sequences_by_deck(
+            plain_col,
+            sched,
+            decks,
+            epoch="2026-01-01",
+            raw_day_index=8,
+            days=7,
+            all_decks=decks,
+        )
+        with_history = schedule._preview_every_n_days_sequences_by_deck(
+            history_col,
+            sched,
+            decks,
+            epoch="2026-01-01",
+            raw_day_index=8,
+            days=7,
+            all_decks=decks,
+        )
+
+        self.assertEqual(plain, with_history)
+
+    def test_fraction_first_today_limit_stays_due_after_missed_day(self) -> None:
+        sched = {
+            "id": "fractiony",
+            "type": "every_n_days",
+            "m": 1,
+            "n": 7,
+            "fractional_strategy": "fraction_first",
+            "stagger": {"mode": "stable"},
+        }
+        decks = [deck(1, "A")]
+        col = FakeBalanceCol(decks, today=anki_today_for_day_index(8), card_rows=[], revlog_rows=[])
+
+        limits = schedule._today_every_n_days_limits_for_schedule(
+            col,
+            sched,
+            decks,
+            decks,
+            "2026-01-01",
+            raw_day_index=8,
+        )
+
+        self.assertEqual(limits, {1: 1})
+
+    def test_fraction_first_today_limit_advances_after_yesterdays_introduction(self) -> None:
+        sched = {
+            "id": "fractiony",
+            "type": "every_n_days",
+            "m": 1,
+            "n": 7,
+            "fractional_strategy": "fraction_first",
+            "stagger": {"mode": "stable"},
+        }
+        decks = [deck(1, "A")]
+        col = FakeBalanceCol(
+            decks,
+            today=anki_today_for_day_index(9),
+            card_rows=[(101, 1, 0)],
+            revlog_rows=[(101, revlog_id_for_day_index(8))],
+        )
+
+        limits = schedule._today_every_n_days_limits_for_schedule(
+            col,
+            sched,
+            decks,
+            decks,
+            "2026-01-01",
+            raw_day_index=9,
+        )
+
+        self.assertEqual(limits, {1: 0})
+
     def test_balance_first_queue_snapshot_shows_pending_due_decks_first(self) -> None:
         sched = {
             "id": "group",
