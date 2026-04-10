@@ -5,7 +5,7 @@ import hashlib
 import json
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
@@ -70,8 +70,15 @@ def _rollover_hours(col) -> int:
 
 
 def anki_day_number_from_timestamp(ts: float, rollover_hours: int) -> int:
-    rollover_seconds = rollover_hours * 3600
-    return int((ts - rollover_seconds) // 86400)
+    local_dt = datetime.fromtimestamp(ts, tz=_local_tzinfo())
+    if (local_dt.hour, local_dt.minute, local_dt.second, local_dt.microsecond) < (
+        rollover_hours,
+        0,
+        0,
+        0,
+    ):
+        local_dt -= timedelta(days=1)
+    return local_dt.date().toordinal()
 
 
 def anki_today(col) -> int:
@@ -90,9 +97,9 @@ def anki_today(col) -> int:
 
 
 def anki_day_number_from_date_str(date_str: str, rollover_hours: int) -> int:
+    del rollover_hours
     year, month, day = [int(x) for x in date_str.split("-")]
-    dt = datetime(year, month, day, 0, 0, 0, tzinfo=_local_tzinfo())
-    return anki_day_number_from_timestamp(dt.timestamp(), rollover_hours)
+    return datetime(year, month, day).date().toordinal()
 
 
 def bresenham_pattern(m: int, n: int) -> List[int]:

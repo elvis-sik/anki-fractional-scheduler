@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 import sys
 import unittest
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -101,9 +102,18 @@ class FakeSqliteBalanceCol:
 
 
 def revlog_id_for_day_index(day_index: int, *, epoch: str = "2026-01-01", rollover: int = 4) -> int:
-    epoch_day = schedule.anki_day_number_from_date_str(epoch, rollover)
-    day_num = epoch_day + day_index
-    return int(((day_num * 86400) + (rollover * 3600) + 60) * 1000)
+    year, month, day = [int(x) for x in epoch.split("-")]
+    target_date = date(year, month, day) + timedelta(days=day_index)
+    dt = datetime(
+        target_date.year,
+        target_date.month,
+        target_date.day,
+        rollover,
+        1,
+        0,
+        tzinfo=datetime.now().astimezone().tzinfo,
+    )
+    return int(dt.timestamp() * 1000)
 
 
 def anki_today_for_day_index(day_index: int, *, epoch: str = "2026-01-01", rollover: int = 4) -> int:
@@ -114,7 +124,7 @@ class AnkiTodayTests(unittest.TestCase):
     def test_anki_today_prefers_absolute_day_cutoff_over_relative_sched_today(self) -> None:
         rollover = 4
         expected_day_number = schedule.anki_day_number_from_date_str("2026-04-10", rollover)
-        day_cutoff = ((expected_day_number + 1) * 86400) + (rollover * 3600)
+        day_cutoff = datetime(2026, 4, 11, rollover, 0, 0, tzinfo=datetime.now().astimezone().tzinfo).timestamp()
         col = type(
             "Col",
             (),
