@@ -731,38 +731,63 @@ def _new_introduction_events_by_assigned_deck(
         start_ms = int(((start_day * 86400) + (rollover_hours * 3600)) * 1000)
     ordered_source_ids = sorted(relevant_source_ids)
     placeholders = ",".join("?" for _ in ordered_source_ids)
-    sql = f"""
-select r.cid,
-       r.id,
-       c.did,
-       c.odid
-from revlog as r
-join cards as c on c.id = r.cid
-where r.ease != 0
-  and (c.did in ({placeholders}) or c.odid in ({placeholders}))
-order by r.cid, r.id
+    cards_sql = f"""
+select id, did, odid
+from cards
+where did in ({placeholders}) or odid in ({placeholders})
 """
 
     try:
-        rows = col.db.all(sql, *ordered_source_ids, *ordered_source_ids)
+        card_rows = col.db.all(cards_sql, *ordered_source_ids, *ordered_source_ids)
     except Exception as exc:
-        print(f"fractional scheduler: failed to query introduction history: {exc}")
+        print(f"fractional scheduler: failed to query candidate cards: {exc}")
         return {}
 
-    introduced: Dict[int, List[IntroductionEvent]] = {}
-    seen_cards: Set[int] = set()
-    for card_id, revlog_id, current_did, original_did in rows:
+    card_sources: Dict[int, int] = {}
+    for card_id, current_did, original_did in card_rows:
         try:
             card_id_int = int(card_id)
-            day_num = anki_day_number_from_timestamp(float(revlog_id) / 1000.0, rollover_hours)
-            day_index = day_num - epoch_day
             source_deck_id = int(original_did) if int(original_did) != 0 else int(current_did)
-            timestamp_ms = int(revlog_id)
         except Exception:
             continue
-        if card_id_int in seen_cards:
+        if source_deck_id not in source_to_targets:
             continue
-        seen_cards.add(card_id_int)
+        card_sources[card_id_int] = source_deck_id
+
+    if not card_sources:
+        return {}
+
+    first_review_by_card: Dict[int, int] = {}
+    card_ids = sorted(card_sources)
+    chunk_size = 400
+    for start in range(0, len(card_ids), chunk_size):
+        chunk = card_ids[start : start + chunk_size]
+        chunk_placeholders = ",".join("?" for _ in chunk)
+        revlog_sql = f"""
+select cid, min(id)
+from revlog
+where ease != 0 and cid in ({chunk_placeholders})
+group by cid
+"""
+        try:
+            revlog_rows = col.db.all(revlog_sql, *chunk)
+        except Exception as exc:
+            print(f"fractional scheduler: failed to query introduction revlog chunk: {exc}")
+            return {}
+        for card_id, revlog_id in revlog_rows:
+            try:
+                first_review_by_card[int(card_id)] = int(revlog_id)
+            except Exception:
+                continue
+
+    introduced: Dict[int, List[IntroductionEvent]] = {}
+    for card_id_int, source_deck_id in card_sources.items():
+        revlog_id = first_review_by_card.get(card_id_int)
+        if revlog_id is None:
+            continue
+        timestamp_ms = revlog_id
+        day_num = anki_day_number_from_timestamp(float(revlog_id) / 1000.0, rollover_hours)
+        day_index = day_num - epoch_day
         if start_ms is not None and timestamp_ms < start_ms:
             continue
         if day_index >= raw_day_index:

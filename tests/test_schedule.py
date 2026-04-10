@@ -21,17 +21,24 @@ class FakeBalanceCol:
         decks: list[schedule.DeckInfo] | None = None,
         *,
         today: int = 10,
-        rows: list[tuple[int, int]] | None = None,
+        card_rows: list[tuple[int, int, int]] | None = None,
+        revlog_rows: list[tuple[int, int]] | None = None,
     ) -> None:
         self.conf = {"rollover": 4}
         self.db = self
         self.sched = type("Sched", (), {"today": today})()
         self.decks = self
         self._decks = decks or [deck(1, "A"), deck(2, "B"), deck(3, "C"), deck(4, "D")]
-        self._rows = rows or []
+        self._card_rows = card_rows or []
+        self._revlog_rows = revlog_rows or []
 
-    def all(self, _sql: str, *_args):
-        return list(self._rows)
+    def all(self, sql: str, *_args):
+        lowered = sql.lower()
+        if "from cards" in lowered:
+            return list(self._card_rows)
+        if "from revlog" in lowered:
+            return list(self._revlog_rows)
+        return []
 
     def all_names_and_ids(self):
         return [{"name": item.name, "id": item.deck_id} for item in self._decks]
@@ -333,9 +340,13 @@ class DailyBudgetPatternTests(unittest.TestCase):
         col = FakeBalanceCol(
             decks,
             today=anki_today_for_day_index(1),
-            rows=[
-                (1001, revlog_id_for_day_index(0), day0_deck, 0),
-                (1002, revlog_id_for_day_index(1), day1_deck, 0),
+            card_rows=[
+                (1001, day0_deck, 0),
+                (1002, day1_deck, 0),
+            ],
+            revlog_rows=[
+                (1001, revlog_id_for_day_index(0)),
+                (1002, revlog_id_for_day_index(1)),
             ],
         )
 
@@ -362,7 +373,7 @@ class DailyBudgetPatternTests(unittest.TestCase):
             "fractional_strategy": "balance_first",
         }
         decks = [deck(1, "A"), deck(2, "B"), deck(3, "C"), deck(4, "D")]
-        col = FakeBalanceCol(decks, today=anki_today_for_day_index(0), rows=[])
+        col = FakeBalanceCol(decks, today=anki_today_for_day_index(0), card_rows=[], revlog_rows=[])
 
         snapshot = schedule.balance_first_queue_snapshot(
             col,
