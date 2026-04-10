@@ -755,7 +755,22 @@ where did in ({placeholders}) or odid in ({placeholders})
         card_sources[card_id_int] = source_deck_id
 
     if not card_sources:
-        return {}
+        introduced = _introduction_events_via_backend_card_stats(
+            col,
+            relevant_source_ids,
+            source_to_targets,
+            epoch_day,
+            rollover_hours,
+            raw_day_index,
+            start_ms=start_ms,
+            allow_pre_epoch_events=allow_pre_epoch_events,
+        )
+        for target_deck_id in list(introduced.keys()):
+            introduced[target_deck_id] = sorted(
+                introduced[target_deck_id],
+                key=lambda event: (event.day_index, event.timestamp_ms, event.deck_id),
+            )
+        return introduced
 
     first_review_by_card: Dict[int, int] = {}
     card_ids = sorted(card_sources)
@@ -780,6 +795,49 @@ group by cid
             except Exception:
                 continue
 
+    introduced = _introduction_events_from_first_reviews(
+        first_review_by_card,
+        card_sources,
+        source_to_targets,
+        epoch_day,
+        rollover_hours,
+        raw_day_index,
+        start_ms=start_ms,
+        allow_pre_epoch_events=allow_pre_epoch_events,
+    )
+
+    if not introduced:
+        introduced = _introduction_events_via_backend_card_stats(
+            col,
+            relevant_source_ids,
+            source_to_targets,
+            epoch_day,
+            rollover_hours,
+            raw_day_index,
+            start_ms=start_ms,
+            allow_pre_epoch_events=allow_pre_epoch_events,
+        )
+
+    for target_deck_id in list(introduced.keys()):
+        introduced[target_deck_id] = sorted(
+            introduced[target_deck_id],
+            key=lambda event: (event.day_index, event.timestamp_ms, event.deck_id),
+        )
+
+    return introduced
+
+
+def _introduction_events_from_first_reviews(
+    first_review_by_card: Dict[int, int],
+    card_sources: Dict[int, int],
+    source_to_targets: Dict[int, List[int]],
+    epoch_day: int,
+    rollover_hours: int,
+    raw_day_index: int,
+    *,
+    start_ms: Optional[int],
+    allow_pre_epoch_events: bool,
+) -> Dict[int, List[IntroductionEvent]]:
     introduced: Dict[int, List[IntroductionEvent]] = {}
     for card_id_int, source_deck_id in card_sources.items():
         revlog_id = first_review_by_card.get(card_id_int)
@@ -802,13 +860,73 @@ group by cid
                     deck_id=target_deck_id,
                 )
             )
+    return introduced
 
-    for target_deck_id in list(introduced.keys()):
-        introduced[target_deck_id] = sorted(
-            introduced[target_deck_id],
-            key=lambda event: (event.day_index, event.timestamp_ms, event.deck_id),
-        )
 
+def _introduction_events_via_backend_card_stats(
+    col,
+    source_deck_ids: Set[int],
+    source_to_targets: Dict[int, List[int]],
+    epoch_day: int,
+    rollover_hours: int,
+    raw_day_index: int,
+    *,
+    start_ms: Optional[int],
+    allow_pre_epoch_events: bool,
+) -> Dict[int, List[IntroductionEvent]]:
+    decks = getattr(col, "decks", None)
+    card_stats_data = getattr(col, "card_stats_data", None)
+    if decks is None or not callable(card_stats_data):
+        return {}
+    cids_for_deck = getattr(decks, "cids", None)
+    if not callable(cids_for_deck):
+        return {}
+
+    introduced: Dict[int, List[IntroductionEvent]] = {}
+    seen_cards: Set[int] = set()
+    for source_deck_id in sorted(source_deck_ids):
+        try:
+            card_ids = list(cids_for_deck(source_deck_id, children=False))
+        except Exception:
+            continue
+        for card_id in card_ids:
+            try:
+                card_id_int = int(card_id)
+            except Exception:
+                continue
+            if card_id_int in seen_cards:
+                continue
+            seen_cards.add(card_id_int)
+            try:
+                stats = card_stats_data(card_id_int)
+            except Exception:
+                continue
+            try:
+                has_first_review = stats.HasField("first_review")
+            except Exception:
+                has_first_review = False
+            if not has_first_review:
+                continue
+            try:
+                timestamp_ms = int(stats.first_review) * 1000
+            except Exception:
+                continue
+            if start_ms is not None and timestamp_ms < start_ms:
+                continue
+            day_num = anki_day_number_from_timestamp(float(timestamp_ms) / 1000.0, rollover_hours)
+            day_index = day_num - epoch_day
+            if day_index >= raw_day_index:
+                continue
+            if day_index < 0 and not allow_pre_epoch_events:
+                continue
+            for target_deck_id in source_to_targets.get(source_deck_id, []):
+                introduced.setdefault(target_deck_id, []).append(
+                    IntroductionEvent(
+                        day_index=day_index,
+                        timestamp_ms=timestamp_ms,
+                        deck_id=target_deck_id,
+                    )
+                )
     return introduced
 
 

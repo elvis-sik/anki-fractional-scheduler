@@ -23,6 +23,8 @@ class FakeBalanceCol:
         today: int = 10,
         card_rows: list[tuple[int, int, int]] | None = None,
         revlog_rows: list[tuple[int, int]] | None = None,
+        deck_card_ids: dict[int, list[int]] | None = None,
+        card_first_reviews: dict[int, int | None] | None = None,
     ) -> None:
         self.conf = {"rollover": 4}
         self.db = self
@@ -31,6 +33,8 @@ class FakeBalanceCol:
         self._decks = decks or [deck(1, "A"), deck(2, "B"), deck(3, "C"), deck(4, "D")]
         self._card_rows = card_rows or []
         self._revlog_rows = revlog_rows or []
+        self._deck_card_ids = deck_card_ids or {}
+        self._card_first_reviews = card_first_reviews or {}
 
     def all(self, sql: str, *_args):
         lowered = sql.lower()
@@ -50,14 +54,28 @@ class FakeBalanceCol:
             "dyn": False,
         }
 
+    def cids(self, deck_id: int, children: bool = False):
+        return list(self._deck_card_ids.get(deck_id, []))
+
+    def card_stats_data(self, card_id: int):
+        first_review = self._card_first_reviews.get(card_id)
+
+        class Stats:
+            def __init__(self, first_review_value):
+                self.first_review = first_review_value or 0
+                self._has_first_review = first_review_value is not None
+
+            def HasField(self, name: str) -> bool:
+                return name == "first_review" and self._has_first_review
+
+        return Stats(first_review)
+
 
 class SqliteAllWrapper:
     def __init__(self) -> None:
         self._conn = sqlite3.connect(":memory:")
         self._conn.execute("create table cards (id integer primary key, did integer, odid integer)")
-        self._conn.execute(
-            "create table revlog (id integer primary key, cid integer, ease integer default 1)"
-        )
+        self._conn.execute("create table revlog (id integer primary key, cid integer, ease integer default 1)")
 
     def all(self, sql: str, *args):
         return list(self._conn.execute(sql, args))
@@ -482,6 +500,33 @@ class DailyBudgetPatternTests(unittest.TestCase):
         )
 
         self.assertEqual([entry.last_introduction_day_offset for entry in snapshot], [0])
+
+    def test_balance_first_falls_back_to_backend_card_stats_when_revlog_query_is_empty(self) -> None:
+        sched = {
+            "id": "group",
+            "type": "every_n_days",
+            "m": 1,
+            "n": 2,
+            "fractional_strategy": "balance_first",
+        }
+        decks = [deck(1, "A")]
+        col = FakeBalanceCol(
+            decks,
+            today=anki_today_for_day_index(1),
+            card_rows=[],
+            revlog_rows=[],
+            deck_card_ids={1: [101]},
+            card_first_reviews={101: revlog_id_for_day_index(0) // 1000},
+        )
+
+        snapshot = schedule.balance_first_queue_snapshot(
+            col,
+            sched,
+            [item.name for item in decks],
+            "2026-01-01",
+        )
+
+        self.assertEqual([entry.last_introduction_day_offset for entry in snapshot], [1])
 
 
 class FeatureAssignmentTests(unittest.TestCase):
