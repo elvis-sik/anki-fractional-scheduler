@@ -4,6 +4,7 @@ import fnmatch
 import hashlib
 import json
 import os
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -16,7 +17,7 @@ FEATURE_NOTIFY = "notify_enabled"
 DEFAULT_FRACTIONAL_STRATEGY = "fraction_first"
 _LAST_BALANCE_FIRST_DEBUG: Dict[str, Any] = {}
 DEBUG_LOG_ENV_VAR = "FRACTIONAL_SCHEDULER_DEBUG"
-DEBUG_LOG_PATH = Path("/tmp/fractional-scheduler-debug.log")
+DEBUG_LOG_PATH = Path(tempfile.gettempdir()) / "fractional-scheduler-debug.log"
 
 
 @dataclass(frozen=True)
