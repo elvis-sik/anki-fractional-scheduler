@@ -117,3 +117,15 @@ The service only includes matched, non-dynamic decks that survive `leaf_only` fi
 - When enabled, the add-on appends JSON lines to `fractional-scheduler-debug.log` in the platform temporary directory.
 - The log may include deck names, schedule ids, queue order, and introduction-history details, so treat it as potentially sensitive and delete it when you are done.
 - When debug logging is not enabled, the add-on removes any old temporary debug log on profile/collection open.
+
+## GUI Smoke Test
+
+The repository has an `anki-addon-workbench` config and probe add-on for a
+disposable Anki GUI smoke test. With `anki-workbench` installed, run:
+
+```bash
+anki-workbench smoke --xvfb
+```
+
+The probe verifies that the add-on module loads and that
+`Fractional Scheduler: Open Config` appears in Anki's Tools menu.

@@ -18,6 +18,17 @@ package = false
 [tool.uv.pip]
 exclude-newer = "7 days"
 
+[tool.anki-addon-workbench]
+project_name = "Anki Fractional Scheduler"
+addon_package = "fractional_scheduler"
+source_root = "addon"
+include = ["__init__.py", "*.py", "manifest.json", "config.json"]
+probe_addon = "tests/gui_smoke/probe_addon"
+probe_package = "zz_fractional_scheduler_probe"
+anki_version = "25.09"
+profile = "User 1"
+docker_image = "fractional-scheduler-anki-gui"
+
 [tool.ruff]
 line-length = 120
 target-version = "py310"

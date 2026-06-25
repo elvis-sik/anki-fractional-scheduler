@@ -31,7 +31,7 @@ class AddonConfig:
     migration: Dict[str, Any]
 
 
-DEFAULT_CONFIG = {
+DEFAULT_CONFIG: Dict[str, Any] = {
     "epoch": "2026-01-01",
     "schedules": [],
     "defaults": {
@@ -219,8 +219,9 @@ def _normalize_stagger_state(raw_state: Any) -> Optional[Dict[str, Any]]:
     if isinstance(schedule_type, str) and schedule_type in VALID_TYPES:
         normalized["schedule_type"] = schedule_type
 
+    raw_cycle_length = raw_state.get("cycle_length")
     try:
-        cycle_length = int(raw_state.get("cycle_length"))
+        cycle_length = int(raw_cycle_length) if raw_cycle_length is not None else None
     except Exception:
         cycle_length = None
     if cycle_length is not None and cycle_length > 0:

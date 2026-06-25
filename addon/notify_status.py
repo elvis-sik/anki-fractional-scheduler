@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, Optional
+from typing import Dict, Iterable, Mapping, Optional
 
 STATUS_LIMITS = "limits"
 STATUS_AVAILABILITY = "availability"
@@ -55,9 +55,9 @@ class NotifyDeckState:
 
 def compute_notify_states(
     decks: Iterable[NotifyDeckEntry],
-    metrics_by_deck_id: Dict[int, NotifyDirectMetrics],
-    notify_assignments: Dict[int, dict],
-    fractional_health_by_deck_id: Dict[int, object],
+    metrics_by_deck_id: Mapping[int, NotifyDirectMetrics],
+    notify_assignments: Mapping[int, dict],
+    fractional_health_by_deck_id: Mapping[int, object],
 ) -> Dict[int, NotifyDeckState]:
     by_name: Dict[str, NotifyDeckState] = {}
     deck_order = []

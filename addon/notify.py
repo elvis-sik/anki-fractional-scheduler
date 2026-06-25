@@ -6,6 +6,7 @@ from typing import Dict, Optional, Tuple
 
 from .notify_status import (
     NotifyDeckEntry,
+    NotifyDeckState,
     NotifyDirectMetrics,
     badge_label,
     badge_tooltip,
@@ -85,7 +86,7 @@ def refresh_deck_browser() -> None:
         deck_browser.refresh()
 
 
-def _compute_notify_states(config) -> Dict[int, object]:
+def _compute_notify_states(config) -> Dict[int, NotifyDeckState]:
     decks = collect_decks(mw.col)
     assignments, _schedule_to_decks = schedule_assignments_for_feature(
         decks,

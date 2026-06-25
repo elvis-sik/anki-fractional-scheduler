@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 from aqt import mw
 from aqt.qt import (
@@ -712,7 +712,7 @@ class SchedulerConfigDialog(QDialog):
             updated["by_day"] = {day: int(self.dow_spins[day].value()) for day in VALID_DAYS}
             self._store_stagger(updated, self.dow_stagger_mode)
 
-        schedules = self.config.get("schedules", [])
+        schedules = cast(List[Dict[str, Any]], self.config.get("schedules", []))
         for idx, existing in enumerate(schedules):
             if str(existing.get("_uid", "")) == updated["_uid"]:
                 schedules[idx] = updated
@@ -759,7 +759,7 @@ class SchedulerConfigDialog(QDialog):
         item.setData(Qt.ItemDataRole.UserRole, sched["_uid"])
         self.schedule_list.addItem(item)
         self.schedule_list.setCurrentRow(self.schedule_list.count() - 1)
-        self._current_uid = sched["_uid"]
+        self._current_uid = str(sched["_uid"])
         self._set_editor_enabled(True)
         self._update_schedule_summary()
 
@@ -1561,7 +1561,11 @@ def _all_deck_names() -> List[str]:
             pass
     if hasattr(decks, "all"):
         try:
-            return [d.get("name") for d in decks.all() if isinstance(d, dict) and d.get("name") and not d.get("dyn")]
+            return [
+                str(d.get("name"))
+                for d in decks.all()
+                if isinstance(d, dict) and d.get("name") and not d.get("dyn")
+            ]
         except Exception:
             pass
     if hasattr(decks, "all_names"):
