@@ -17,6 +17,8 @@ except Exception:  # pragma: no cover
 
 
 LAST_APPLIED_DAY_CONFIG_KEY = "fractional_scheduler.last_applied_day"
+
+
 def _log(message: str) -> None:
     if mw is None:
         return
@@ -118,7 +120,7 @@ def _on_collection_open(col) -> None:
     _apply(col, "collection_open")
 
 
-def _on_sync_finish() -> None:
+def _apply_for_sync(source: str) -> None:
     if mw is None or mw.col is None:
         return
     config = load_config(__name__)
@@ -126,7 +128,22 @@ def _on_sync_finish() -> None:
         return
     if _should_skip_automatic_apply(mw.col, config):
         return
-    _apply(mw.col, "sync_finish")
+    _apply(mw.col, source)
+
+
+def _on_sync_start() -> None:
+    _apply_for_sync("sync_start")
+
+
+def _on_sync_finish() -> None:
+    _apply_for_sync("sync_finish")
+
+
+def _register_sync_apply_hook(hooks) -> None:
+    if hasattr(hooks, "sync_will_start"):
+        hooks.sync_will_start.append(_on_sync_start)
+    elif hasattr(hooks, "sync_did_finish"):
+        hooks.sync_did_finish.append(_on_sync_finish)
 
 
 def _open_config() -> bool:
@@ -175,8 +192,7 @@ if gui_hooks is not None:
         gui_hooks.collection_did_open.append(_on_collection_open)
     elif hasattr(gui_hooks, "collection_did_load"):
         gui_hooks.collection_did_load.append(_on_collection_open)
-    if hasattr(gui_hooks, "sync_did_finish"):
-        gui_hooks.sync_did_finish.append(_on_sync_finish)
+    _register_sync_apply_hook(gui_hooks)
     if hasattr(gui_hooks, "deck_browser_will_render_content"):
         gui_hooks.deck_browser_will_render_content.append(_decorate_decks_screen)
     gui_hooks.main_window_did_init.append(_setup_menu)

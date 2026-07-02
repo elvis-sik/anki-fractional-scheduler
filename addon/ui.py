@@ -408,7 +408,7 @@ class SchedulerConfigDialog(QDialog):
         self.apply_on_profile_open_check = QCheckBox("On profile open")
         self.apply_on_collection_open_check = QCheckBox("On collection open")
         self.apply_once_per_day_check = QCheckBox("At most once per day")
-        self.apply_on_sync_check = QCheckBox("After sync")
+        self.apply_on_sync_check = QCheckBox("Before sync")
         self.apply_on_profile_open_check.setToolTip("Apply schedules automatically when Anki opens a profile.")
         self.apply_on_collection_open_check.setToolTip(
             "Apply schedules automatically when the collection finishes loading."
@@ -416,7 +416,9 @@ class SchedulerConfigDialog(QDialog):
         self.apply_once_per_day_check.setToolTip(
             "Skip repeated automatic applications on the same Anki day. Manual apply still always runs."
         )
-        self.apply_on_sync_check.setToolTip("Apply schedules automatically when a sync finishes.")
+        self.apply_on_sync_check.setToolTip(
+            "Apply schedules automatically just before collection sync starts, so changed limits sync immediately."
+        )
         self.apply_on_profile_open_check.stateChanged.connect(self._on_defaults_changed)
         self.apply_on_collection_open_check.stateChanged.connect(self._on_defaults_changed)
         self.apply_once_per_day_check.stateChanged.connect(self._on_defaults_changed)
@@ -1562,9 +1564,7 @@ def _all_deck_names() -> List[str]:
     if hasattr(decks, "all"):
         try:
             return [
-                str(d.get("name"))
-                for d in decks.all()
-                if isinstance(d, dict) and d.get("name") and not d.get("dyn")
+                str(d.get("name")) for d in decks.all() if isinstance(d, dict) and d.get("name") and not d.get("dyn")
             ]
         except Exception:
             pass

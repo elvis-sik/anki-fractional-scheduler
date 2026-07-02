@@ -27,7 +27,7 @@ An Anki add-on for two related jobs:
 - Fractional-only `leaf_only` matching so container decks do not receive limits.
 - Per-schedule notify descendant modes: direct only, any blocked descendant, all blocked descendants, or hide container badges.
 - Filtered decks are skipped.
-- Automatic apply on profile open, collection open, and optionally sync, with an at-most-once-per-day guard.
+- Automatic apply on profile open, collection open, and optionally just before sync, with an at-most-once-per-day guard.
 - Preview table for the next 14 days, including daily totals, persistent column widths, and grouping by identical schedules.
 - `Rebalance Offsets` recomputes stable stagger assignments for the currently matched decks in a schedule.
 - Read-only API for other add-ons via `mw.fractional_scheduler_api`.
