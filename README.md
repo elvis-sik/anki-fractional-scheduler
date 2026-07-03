@@ -1,5 +1,6 @@
 # Fractional New-Card Scheduler
 
+[![AnkiWeb add-on 304166926](https://img.shields.io/badge/AnkiWeb-304166926-2f80ed)](https://ankiweb.net/shared/info/304166926)
 [![Source on GitHub](https://img.shields.io/badge/source-GitHub-24292f)](https://github.com/elvis-sik/anki-fractional-scheduler)
 ![Anki 2.1.55+](https://img.shields.io/badge/Anki-%3E%3D2.1.55-4caf50)
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
@@ -20,7 +21,16 @@ or have no unsuspended new cards available.
 
 Requires Anki 2.1.55 or newer.
 
-An AnkiWeb listing is planned. Until then, install from source:
+### From AnkiWeb
+
+1. In Anki, open `Tools -> Add-ons -> Get Add-ons...`.
+2. Enter add-on code `304166926`.
+3. Restart Anki.
+4. Use `Tools -> Fractional Scheduler: Open Config` to edit config.
+
+AnkiWeb page: <https://ankiweb.net/shared/info/304166926>
+
+### From Source
 
 1. Copy the `addon` folder into your Anki add-ons directory as its own folder,
    such as `FractionalScheduler`.
