@@ -4,6 +4,8 @@ SHELL := /bin/bash
 PYTHON ?= python3
 UV ?= uv
 UV_CACHE_DIR ?= .uv-cache
+RUFF ?= $(if $(wildcard .venv/bin/ruff),.venv/bin/ruff,$(UV) run --extra dev ruff)
+MYPY ?= $(if $(wildcard .venv/bin/mypy),.venv/bin/mypy,$(UV) run --extra dev mypy)
 RELEASE_PROJECT ?= ../anki-addon-release
 RELEASE_ENV_FILE ?= .env
 RELEASE_DIAGNOSTICS_DIR ?= .anki-addon-release/diagnostics
@@ -39,7 +41,7 @@ lint-paths:
 lint-python:
 	@if [ -n "$(PY_FILES)" ]; then \
 		if [ -f pyproject.toml ]; then \
-			$(UV) run --extra dev ruff check $(PY_FILES); \
+			$(RUFF) check $(PY_FILES); \
 		else \
 			$(PYTHON) -m compileall -q $(PY_FILES); \
 		fi; \
@@ -64,7 +66,7 @@ lint-shell:
 type:
 	@if [ -n "$(MYPY_FILES)" ]; then \
 		if [ -f pyproject.toml ]; then \
-			$(UV) run --extra dev mypy $(MYPY_FILES); \
+			$(MYPY) $(MYPY_FILES); \
 		else \
 			$(PYTHON) -m compileall -q $(MYPY_FILES); \
 		fi; \
