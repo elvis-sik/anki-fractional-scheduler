@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import json
 import py_compile
+import re
 import subprocess
 import sys
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKSPACE_PATH = "/" + str(Path("Users") / "elvis" / "Code" / "anki-studying")
+ABSOLUTE_PATH_NEEDLES = tuple(
+    str(path)
+    for path in (ROOT, ROOT.parent)
+    if str(path) not in {"", "."}
+)
 
 SKIP_PARTS = {
     ".git",
@@ -39,7 +44,9 @@ SKIP_PREFIXES = {
 }
 
 PORTABLE_SUFFIXES = {
+    "",
     ".css",
+    ".example",
     ".html",
     ".js",
     ".json",
@@ -51,6 +58,26 @@ PORTABLE_SUFFIXES = {
     ".ts",
     ".yaml",
     ".yml",
+}
+
+FORBIDDEN_TRACKED_FILES = {
+    ".env",
+    "addon/meta.json",
+}
+
+FORBIDDEN_TRACKED_SUFFIXES = {
+    ".ankiaddon",
+    ".apkg",
+    ".colpkg",
+    ".db",
+    ".log",
+    ".sqlite",
+}
+
+PRIVATE_KEY_RE = re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----")
+OP_REFERENCE_RE = re.compile("op" + r"://[^\s\"']+")
+OP_REFERENCE_ALLOWED = {
+    ".env.example",
 }
 
 
@@ -75,6 +102,8 @@ def is_skipped(path: Path) -> bool:
 def readable_text(path: Path) -> str | None:
     try:
         return (ROOT / path).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
     except UnicodeDecodeError:
         return None
 
@@ -100,10 +129,35 @@ class RepositoryHygieneTest(unittest.TestCase):
             if is_skipped(path) or path.suffix not in PORTABLE_SUFFIXES:
                 continue
             text = readable_text(path)
-            if text is not None and WORKSPACE_PATH in text:
+            if text is not None and any(needle in text for needle in ABSOLUTE_PATH_NEEDLES):
                 offenders.append(path.as_posix())
 
         self.assertEqual([], offenders, "portable files should use relative paths")
+
+    def test_no_tracked_local_state_or_artifacts(self) -> None:
+        offenders: list[str] = []
+        for path in git_files():
+            as_posix = path.as_posix()
+            if as_posix in FORBIDDEN_TRACKED_FILES or path.suffix in FORBIDDEN_TRACKED_SUFFIXES:
+                offenders.append(as_posix)
+
+        self.assertEqual([], offenders, "local state, logs, and release artifacts should not be tracked")
+
+    def test_no_secret_material_in_portable_files(self) -> None:
+        offenders: list[str] = []
+        for path in git_files():
+            if is_skipped(path) or path.suffix not in PORTABLE_SUFFIXES:
+                continue
+            text = readable_text(path)
+            if text is None:
+                continue
+            as_posix = path.as_posix()
+            if PRIVATE_KEY_RE.search(text):
+                offenders.append(as_posix)
+            if OP_REFERENCE_RE.search(text) and as_posix not in OP_REFERENCE_ALLOWED:
+                offenders.append(as_posix)
+
+        self.assertEqual([], sorted(set(offenders)), "secret material should not be tracked")
 
     def test_tracked_json_files_parse(self) -> None:
         for path in git_files():

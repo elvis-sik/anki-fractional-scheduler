@@ -7,7 +7,7 @@ Fractional New-Card Scheduler lets you pace new cards below whole-number daily l
 
 Use it when some decks deserve a slow trickle of new material instead of a fixed whole number every day. The add-on can target exact decks or wildcard deck groups, preview the next 14 days, and apply the resulting Today-only limits automatically on profile open, collection open, or before sync.
 
-It also includes the old empty-deck warning workflow: schedule rules can show deck-list badges when a deck or its monitored descendants are blocked by 0/day limits or have no unsuspended new cards available.
+It also includes deck health badges: schedule rules can mark decks when a deck or its monitored descendants are blocked by 0/day limits or have no unsuspended new cards available.
 
 Features:
 

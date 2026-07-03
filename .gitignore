@@ -3,6 +3,10 @@ __pycache__/
 addon/meta.json
 .env
 dist/
+*.ankiaddon
+*.apkg
+*.colpkg
+*.log
 .anki-addon-release/
 .DS_Store
 .tmp-config-window/

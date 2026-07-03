@@ -1,5 +1,10 @@
 # Missed-Day Balancing Ideas
 
+This is a historical design note for the `balance_first` strategy documented in
+[Scheduling Strategies](scheduling-strategies.md). The ordered-rotation approach
+described below is now implemented; the alternate designs are kept as rationale
+for future scheduling changes.
+
 ## Problem
 
 The add-on already has an important behavior for `every_n_days` schedules: if a deck was supposed to introduce a new card on a given day and that introduction did not happen, that release stays pending instead of being lost.

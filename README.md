@@ -1,38 +1,64 @@
-# Anki Fractional New-Card Scheduler
+# Fractional New-Card Scheduler
 
-An Anki add-on for two related jobs:
+[![Source on GitHub](https://img.shields.io/badge/source-GitHub-24292f)](https://github.com/elvis-sik/anki-fractional-scheduler)
+![Anki 2.1.55+](https://img.shields.io/badge/Anki-%3E%3D2.1.55-4caf50)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 
-- schedule fractional new cards per deck or deck groups, e.g. "1 every 3 days" or a day-of-week schedule, by automatically adjusting Today-Only new-card limits
-- show deck-list warning badges when decks or monitored descendants are blocked by `0/day` limits or have no unsuspended new cards available
+Fractional New-Card Scheduler is an Anki add-on for decks that should introduce
+new cards more slowly than Anki's normal whole-number daily limits allow.
 
-## Status
-- Scheduler logic is implemented.
-- The add-on includes a Qt config dialog for editing schedules, previewing the next 14 days in a scrollable table, and configuring automatic apply behavior.
-- Limits are applied through Anki's deck-config update path so they affect the Today-Only new-card limit UI.
+Instead of choosing between `0/day` and `1/day`, you can schedule patterns such
+as `1 every 3 days`, set different limits by weekday, and spread related decks
+across a steady rotation. The add-on applies those plans through Anki's
+Today-only new-card limits, so changes are temporary and reset with Anki's next
+day.
 
-## Install (manual)
+It also includes deck health badges for decks that are blocked by `0/day` limits
+or have no unsuspended new cards available.
+
+## Install
+
 Requires Anki 2.1.55 or newer.
 
-1. Copy the `addon` folder into your Anki add-ons directory as its own folder (e.g. `FractionalScheduler`).
+An AnkiWeb listing is planned. Until then, install from source:
+
+1. Copy the `addon` folder into your Anki add-ons directory as its own folder,
+   such as `FractionalScheduler`.
 2. Restart Anki.
 3. Use `Tools -> Fractional Scheduler: Open Config` to edit config.
-4. Configure notify badges in that same scheduler dialog; there is no separate Notify Empty Decks settings window anymore.
+4. Configure both scheduling and deck health badges from that dialog.
 
 ## Features
+
 - Each schedule can enable fractional limits, notify badges, both, or neither.
-- `Every N Days` schedules such as 1 card every 3 days.
-- Three fractional strategies for `every_n_days`: `balance_first`, `fraction_first`, and `hash`.
+- Every-N-days schedules such as 1 card every 3 days.
+- Three fractional strategies: `balance_first`, `fraction_first`, and `hash`.
 - Day-of-week schedules with separate values for Mon-Sun.
 - Multiple deck targets per schedule using exact names or shell-style wildcards.
 - `Pick deck...` adds exact targets immediately, and `Add wildcard...` adds wildcard targets from the deck picker.
 - Optional stable staggering for `fraction_first` and day-of-week schedules.
-- Fractional-only `leaf_only` matching so container decks do not receive limits.
+- Leaf-only matching so container decks do not receive fractional limits.
 - Per-schedule notify descendant modes: direct only, any blocked descendant, all blocked descendants, or hide container badges.
 - Filtered decks are skipped.
 - Automatic apply on profile open, collection open, and optionally just before sync, with an at-most-once-per-day guard.
 - Preview table for the next 14 days, including daily totals, persistent column widths, and grouping by identical schedules.
 - `Rebalance Offsets` recomputes stable stagger assignments for the currently matched decks in a schedule.
 - Read-only API for other add-ons via `mw.fractional_scheduler_api`.
+
+See [Scheduling Strategies](docs/scheduling-strategies.md) for the tradeoffs
+between the fractional strategies.
+
+## Usage Notes
+
+- The config dialog autosaves; there is no separate Save button.
+- `Apply Now` writes Today-only limits immediately for the matched decks.
+- `Before sync` applies limits before collection sync when the installed Anki
+  version exposes the pre-sync hook.
+- `Rebalance Offsets` updates stored stagger assignments and preview data; deck
+  limits change on the next apply.
+- If you use a non-midnight Anki day rollover, the epoch calculation respects
+  the rollover hour.
+- `addon/meta.json` is local Anki state and is intentionally not tracked in git.
 
 ## Public API
 
@@ -42,7 +68,7 @@ The add-on registers a read-only service on `mw`:
 snapshot = mw.fractional_scheduler_api.get_schedule_health_snapshot(col)
 ```
 
-It returns a dict keyed by deck id. Each value reports:
+It returns a dictionary keyed by deck id. Each value reports:
 
 - `deck_id`
 - `deck_name`
@@ -51,9 +77,12 @@ It returns a dict keyed by deck id. Each value reports:
 - `has_future_positive_limit`
 - `next_positive_day_offset`
 
-The service only includes matched, non-dynamic decks that survive `leaf_only` filtering. A deck is considered to have a future positive limit if, within one full schedule cycle, at least one day yields `> 0` new cards.
+The service only includes matched, non-dynamic decks that survive `leaf_only`
+filtering. A deck is considered to have a future positive limit if, within one
+full schedule cycle, at least one day yields `> 0` new cards.
 
 ## Config Example
+
 ```json
 {
   "epoch": "2026-01-01",
@@ -94,26 +123,8 @@ The service only includes matched, non-dynamic decks that survive `leaf_only` fi
 }
 ```
 
-## How It Works
-- For `every_n_days`, the add-on uses a deterministic, front-loaded repeating integer pattern for both per-deck cadence and group-level daily budgets.
-- `fraction_first` keeps each deck due as soon as its own cadence says it is owed another introduction, so missed days can bunch later work together.
-- `balance_first` uses a stable deck queue plus a shared daily budget so missed introductions keep their place without creating a catch-up spike the next day.
-- `hash` uses deterministic hashed offsets for a static spread that does not replay deck history.
-- When stable staggering is enabled, existing decks keep their assigned offsets and newly matched decks are placed into the lightest current phase for that schedule.
-- For `dow`, it applies the specified weekday limits (optionally rotated per deck if staggering is enabled).
-- Matching is by exact deck name or shell-style wildcard.
-- Notify schedules are assigned independently from fractional schedules, so a notify-only rule cannot steal fractional ownership from a deck.
-- Notify exact targets can include descendants when the schedule's notify mode is not `direct_only`.
-- Matching decks are grouped in the preview when they share the same visible schedule pattern.
-
-## Notes
-- If you use a non-midnight Anki day rollover, the epoch calculation respects the rollover hour.
-- The config dialog autosaves; there is no separate Save button.
-- `Rebalance Offsets` updates stored stagger assignments and preview data; deck limits change on the next apply.
-- Notify badges are configured per schedule inside the main Fractional Scheduler dialog.
-- `addon/meta.json` is local Anki state and is intentionally not tracked in git.
-
 ## Debug Logging
+
 - Debug logging is off by default and no queue/history diagnostics are shown in the UI.
 - To enable temporary scheduler diagnostics before Anki loads the add-on, start Anki with the environment variable `FRACTIONAL_SCHEDULER_DEBUG=1`.
 - When enabled, the add-on appends JSON lines to `fractional-scheduler-debug.log` in the platform temporary directory.
@@ -122,8 +133,7 @@ The service only includes matched, non-dynamic decks that survive `leaf_only` fi
 
 ## GUI Smoke Test
 
-The repository has an `anki-addon-workbench` config and probe add-on for a
-disposable Anki GUI smoke test. With `anki-workbench` installed, run:
+The repository has an `anki-addon-workbench` config and probe add-on for a disposable Anki GUI smoke test. With `anki-workbench` installed, run:
 
 ```bash
 anki-workbench smoke --xvfb
@@ -134,7 +144,7 @@ The probe verifies that the add-on module loads and that
 
 ## Release
 
-Release packaging uses the sibling `anki-addon-release` project:
+Release packaging uses the sibling `anki-addon-release` project.
 
 ```bash
 make release
@@ -146,3 +156,7 @@ and runs an AnkiWeb dry run. Use `make release-handoff` to write handoff files
 for a browser/manual upload, or `make release-login` and `make release-publish`
 when publishing through the release browser profile with credentials from a
 git-ignored `.env` file.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
