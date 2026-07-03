@@ -17,6 +17,8 @@ day.
 It also includes deck health badges for decks that are blocked by `0/day` limits
 or have no unsuspended new cards available.
 
+![Fractional Scheduler config dialog](docs/images/config-window.png)
+
 ## Install
 
 Requires Anki 2.1.55 or newer.
