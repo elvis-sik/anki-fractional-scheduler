@@ -25,6 +25,7 @@ from aqt.qt import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSplitter,
     QSpinBox,
     QStackedWidget,
     Qt,
@@ -53,12 +54,12 @@ STAGGER_OPTIONS = [
     ("Off", "none"),
 ]
 STAGGER_DESCRIPTIONS = {
-    "stable": "Keep existing deck offsets stable and place newly matched decks into the lightest phase.",
-    "none": "Do not offset decks. Matching decks follow the same schedule on the same days.",
+    "stable": "Keep offsets stable; place new decks into the lightest phase.",
+    "none": "All matching decks follow the same days.",
 }
 TYPE_DESCRIPTIONS = {
-    "every_n_days": "Introduce new cards on a repeating cycle, such as 1 card every 3 days.",
-    "dow": "Set a separate new-card limit for each weekday.",
+    "every_n_days": "Repeating cycle, e.g. 1 card every 3 days.",
+    "dow": "Separate new-card limit for each weekday.",
 }
 FRACTIONAL_STRATEGY_OPTIONS = [
     ("Balance first", "balance_first"),
@@ -66,17 +67,9 @@ FRACTIONAL_STRATEGY_OPTIONS = [
     ("Hash spread", "hash"),
 ]
 FRACTIONAL_STRATEGY_DESCRIPTIONS = {
-    "balance_first": (
-        "Use a rotating deck queue and a shared daily budget so missed decks keep their place "
-        "without creating catch-up spikes."
-    ),
-    "fraction_first": (
-        "Keep each deck eligible as soon as its own cadence says it is due, even if that creates "
-        "bunching after missed days."
-    ),
-    "hash": (
-        "Use a deterministic static spread based on deck identity, without history-sensitive catch-up or queue repair."
-    ),
+    "balance_first": "Shared daily budget; missed decks keep their queue position.",
+    "fraction_first": "Each deck becomes due on its own cadence.",
+    "hash": "Static spread based on deck identity.",
 }
 NOTIFY_MODE_OPTIONS = [
     ("This row only", "direct_only"),
@@ -85,12 +78,10 @@ NOTIFY_MODE_OPTIONS = [
     ("Hide container badge", "hide_container_rows"),
 ]
 NOTIFY_MODE_DESCRIPTIONS = {
-    "direct_only": ("Only this exact deck row checks its own direct cards. Descendants do not affect it."),
-    "any_blocked_descendant": "This row also warns when any included descendant deck is blocked.",
-    "all_included_descendants_blocked": (
-        "This row only warns for descendants when every included descendant deck is blocked."
-    ),
-    "hide_container_rows": "Descendants still count for health, but pure container rows stay quiet.",
+    "direct_only": "Only this exact deck row checks its direct cards.",
+    "any_blocked_descendant": "Warn when any included descendant deck is blocked.",
+    "all_included_descendants_blocked": "Warn only when every included descendant is blocked.",
+    "hide_container_rows": "Descendants count, but pure container rows stay quiet.",
 }
 PREVIEW_DAYS = 14
 SCHEDULE_LIST_WIDTH = 260
@@ -209,27 +200,45 @@ class SchedulerConfigDialog(QDialog):
         schedule_tab = QWidget()
         schedule_tab_layout = QVBoxLayout(schedule_tab)
         schedule_tab_layout.setContentsMargins(0, 0, 0, 0)
-        schedule_tab_layout.setSpacing(10)
+        schedule_tab_layout.setSpacing(0)
+
+        self.schedule_stack = QStackedWidget()
+        self.empty_schedule_widget = self._build_empty_schedule_widget()
+
+        self.schedule_editor_widget = QWidget()
+        schedule_editor_layout = QVBoxLayout(self.schedule_editor_widget)
+        schedule_editor_layout.setContentsMargins(0, 0, 0, 0)
+        schedule_editor_layout.setSpacing(8)
+
+        self.schedule_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.schedule_splitter.setChildrenCollapsible(False)
+
+        schedule_top = QWidget()
+        schedule_top_layout = QVBoxLayout(schedule_top)
+        schedule_top_layout.setContentsMargins(0, 0, 0, 0)
+        schedule_top_layout.setSpacing(8)
 
         autosave_note = QLabel("Changes save automatically.")
         autosave_note.setStyleSheet("color: palette(mid);")
-        schedule_tab_layout.addWidget(autosave_note)
+        schedule_top_layout.addWidget(autosave_note)
 
-        action_row = QHBoxLayout()
-        self.rebalance_btn = QPushButton("Rebalance Offsets")
-        self.rebalance_btn.setToolTip(
-            "Recompute stable stagger offsets for schedules that use stable offset balancing."
-        )
-        self.rebalance_btn.clicked.connect(self._rebalance_current_schedule)
-        self.rebalance_help = QLabel(
-            "Useful for stable offset schedules after deck additions or moves. This updates the "
-            "preview only; apply limits separately."
-        )
-        self.rebalance_help.setWordWrap(True)
-        self.rebalance_help.setStyleSheet("color: palette(mid);")
-        action_row.addWidget(self.rebalance_btn)
-        action_row.addWidget(self.rebalance_help, 1)
-        schedule_tab_layout.addLayout(action_row)
+        self.setup_tabs = QTabWidget()
+        basics_tab = QWidget()
+        basics_tab_layout = QVBoxLayout(basics_tab)
+        basics_tab_layout.setContentsMargins(0, 0, 0, 0)
+        basics_tab_layout.setSpacing(8)
+        rule_tab = QWidget()
+        rule_tab_layout = QVBoxLayout(rule_tab)
+        rule_tab_layout.setContentsMargins(0, 0, 0, 0)
+        rule_tab_layout.setSpacing(8)
+        target_tab = QWidget()
+        target_tab_layout = QVBoxLayout(target_tab)
+        target_tab_layout.setContentsMargins(0, 0, 0, 0)
+        target_tab_layout.setSpacing(8)
+        self.setup_tabs.addTab(basics_tab, "Basics")
+        self.setup_tabs.addTab(rule_tab, "Rule")
+        self.setup_tabs.addTab(target_tab, "Targets")
+        schedule_top_layout.addWidget(self.setup_tabs, 1)
 
         schedule_box = QGroupBox("Schedule")
         schedule_form = QFormLayout(schedule_box)
@@ -264,14 +273,9 @@ class SchedulerConfigDialog(QDialog):
         self.type_help = QLabel()
         self.type_help.setWordWrap(True)
         self.type_help.setStyleSheet("color: palette(mid);")
-        self.leaf_only_help = QLabel("Recommended for wildcard targets so parent container decks do not get limits.")
+        self.leaf_only_help = QLabel("Skips parent container decks.")
         self.leaf_only_help.setWordWrap(True)
         self.leaf_only_help.setStyleSheet("color: palette(mid);")
-        self.feature_help = QLabel(
-            "A schedule can drive fractional limits, notify badges, both, or neither for testing."
-        )
-        self.feature_help.setWordWrap(True)
-        self.feature_help.setStyleSheet("color: palette(mid);")
         self.notify_mode_help = QLabel()
         self.notify_mode_help.setWordWrap(True)
         self.notify_mode_help.setStyleSheet("color: palette(mid);")
@@ -283,37 +287,45 @@ class SchedulerConfigDialog(QDialog):
         schedule_form.addRow("", self.leaf_only_check)
         schedule_form.addRow("", self.notify_enabled_check)
         schedule_form.addRow("Notify descendants", self.notify_mode_combo)
-        schedule_form.addRow("", self.feature_help)
         schedule_form.addRow("", self.leaf_only_help)
         schedule_form.addRow("", self.notify_mode_help)
-        schedule_tab_layout.addWidget(schedule_box)
+        basics_tab_layout.addWidget(schedule_box)
+        basics_tab_layout.addStretch(1)
 
         self.rule_box = QGroupBox("Rule")
         rule_layout = QVBoxLayout(self.rule_box)
         rule_layout.setContentsMargins(12, 12, 12, 12)
         rule_layout.addWidget(self.stack, 0, Qt.AlignmentFlag.AlignTop)
-        schedule_tab_layout.addWidget(self.rule_box)
+        self.rebalance_row = QWidget()
+        rebalance_layout = QHBoxLayout(self.rebalance_row)
+        rebalance_layout.setContentsMargins(0, 8, 0, 0)
+        self.rebalance_btn = QPushButton("Rebalance Offsets")
+        self.rebalance_btn.setToolTip(
+            "Recompute stable stagger offsets for the selected schedule."
+        )
+        self.rebalance_btn.clicked.connect(self._rebalance_current_schedule)
+        self.rebalance_help = QLabel("Recomputes stored offsets; apply limits separately.")
+        self.rebalance_help.setWordWrap(True)
+        self.rebalance_help.setStyleSheet("color: palette(mid);")
+        rebalance_layout.addWidget(self.rebalance_btn)
+        rebalance_layout.addWidget(self.rebalance_help, 1)
+        rule_layout.addWidget(self.rebalance_row)
+        self.rebalance_row.setVisible(False)
+        rule_tab_layout.addWidget(self.rule_box)
         self.rule_box.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         self.stack.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        rule_tab_layout.addStretch(1)
 
         # Targets
         target_box = QGroupBox("Deck targets")
         target_layout = QVBoxLayout(target_box)
         self.target_list = QListWidget()
-        self.target_list.setMinimumHeight(80)
-        self.target_list.setMaximumHeight(110)
-        self.target_help = QLabel(
-            "Pick deck adds an exact target immediately. Targets also support shell-style wildcards "
-            "like Deck::Subdeck*, *Chemistry*, or Deck??."
-        )
-        self.target_help.setWordWrap(True)
-        self.target_help.setStyleSheet("color: palette(mid);")
+        self.target_list.setMinimumHeight(48)
+        self.target_list.setMaximumHeight(64)
         self.target_summary = QLabel("No targets yet.")
         self.target_summary.setWordWrap(True)
         self.target_summary.setStyleSheet("color: palette(mid);")
-        target_layout.addWidget(self.target_help)
         target_layout.addWidget(self.target_summary)
-        target_layout.addWidget(self.target_list)
 
         target_add_row = QHBoxLayout()
         self.target_input = QLineEdit()
@@ -331,13 +343,21 @@ class SchedulerConfigDialog(QDialog):
         target_add_row.addWidget(self.target_pick_wildcard)
         target_add_row.addWidget(self.target_add)
         target_layout.addLayout(target_add_row)
-        target_layout.addWidget(self.target_remove)
-        schedule_tab_layout.addWidget(target_box)
+        target_list_row = QHBoxLayout()
+        target_list_row.addWidget(self.target_list, 1)
+        target_list_row.addWidget(self.target_remove)
+        target_layout.addLayout(target_list_row)
+        target_tab_layout.addWidget(target_box)
         target_box.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        target_tab_layout.addStretch(1)
 
         # Preview
         preview_box = QGroupBox("Preview")
-        preview_layout = QVBoxLayout(preview_box)
+        preview_outer_layout = QVBoxLayout(preview_box)
+        self.preview_tabs = QTabWidget()
+        preview_page = QWidget()
+        preview_layout = QVBoxLayout(preview_page)
+        preview_layout.setContentsMargins(0, 0, 0, 0)
         self.preview_summary = QLabel("Select a schedule to preview it.")
         self.preview_summary.setWordWrap(True)
         self.preview_summary.setStyleSheet("color: palette(mid);")
@@ -364,11 +384,13 @@ class SchedulerConfigDialog(QDialog):
             "border-top: 1px solid #b8c4d3; border-left: 1px solid #b8c4d3; "
             "border-right: 1px solid #8fa1b8; border-bottom: 1px solid #8fa1b8; }"
         )
-        self.preview_table.setMinimumHeight(180)
+        self.preview_table.setMinimumHeight(110)
         self.preview_table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         preview_layout.addWidget(self.preview_summary)
         preview_layout.addWidget(self.preview_table, 1)
-        self.balance_queue_box = QGroupBox("Balance-First Queue")
+        self.preview_tabs.addTab(preview_page, "14 days")
+
+        self.balance_queue_box = QWidget()
         balance_queue_layout = QVBoxLayout(self.balance_queue_box)
         self.balance_queue_summary = QLabel("Queue details are available for balance-first schedules.")
         self.balance_queue_summary.setWordWrap(True)
@@ -385,14 +407,28 @@ class SchedulerConfigDialog(QDialog):
         self.balance_queue_table.horizontalHeader().setHighlightSections(False)
         self.balance_queue_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.balance_queue_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.balance_queue_table.setMinimumHeight(160)
+        self.balance_queue_table.setMinimumHeight(90)
         balance_queue_layout.addWidget(self.balance_queue_summary)
         balance_queue_layout.addWidget(self.balance_queue_table, 1)
-        self.balance_queue_box.setVisible(False)
-        preview_layout.addWidget(self.balance_queue_box)
-        schedule_tab_layout.addWidget(preview_box, 1)
+        self.balance_queue_tab_index = self.preview_tabs.addTab(self.balance_queue_box, "Balance queue")
+        self._set_balance_queue_visible(False)
+        preview_outer_layout.addWidget(self.preview_tabs, 1)
         preview_box.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
-        schedule_tab_layout.addStretch(1)
+        schedule_top_layout.addStretch(1)
+
+        schedule_top_scroll = self._wrap_scroll_tab(schedule_top)
+        schedule_top_scroll.setMinimumHeight(220)
+        schedule_top_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.schedule_splitter.addWidget(schedule_top_scroll)
+        self.schedule_splitter.addWidget(preview_box)
+        self.schedule_splitter.setStretchFactor(0, 0)
+        self.schedule_splitter.setStretchFactor(1, 1)
+        self.schedule_splitter.setSizes([260, 260])
+        schedule_editor_layout.addWidget(self.schedule_splitter, 1)
+
+        self.schedule_stack.addWidget(self.empty_schedule_widget)
+        self.schedule_stack.addWidget(self.schedule_editor_widget)
+        schedule_tab_layout.addWidget(self.schedule_stack, 1)
 
         global_tab = QWidget()
         global_layout = QVBoxLayout(global_tab)
@@ -430,7 +466,7 @@ class SchedulerConfigDialog(QDialog):
         global_layout.addWidget(defaults_box)
         global_layout.addStretch(1)
 
-        self.tabs.addTab(self._wrap_scroll_tab(schedule_tab), "Schedule")
+        self.tabs.addTab(schedule_tab, "Schedule")
         self.tabs.addTab(self._wrap_scroll_tab(global_tab), "Global settings")
 
         # Buttons
@@ -460,6 +496,24 @@ class SchedulerConfigDialog(QDialog):
 
         self._update_type_help()
         self._sync_rule_stack_height()
+
+    def _build_empty_schedule_widget(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(32, 32, 32, 32)
+        layout.addStretch(1)
+
+        title = QLabel("No schedules yet")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("font-weight: 600;")
+        layout.addWidget(title)
+
+        self.empty_add_btn = QPushButton("Add Schedule")
+        self.empty_add_btn.setAutoDefault(False)
+        self.empty_add_btn.clicked.connect(self._add_schedule)
+        layout.addWidget(self.empty_add_btn, 0, Qt.AlignmentFlag.AlignHCenter)
+        layout.addStretch(2)
+        return widget
 
     def _fit_to_screen(self) -> None:
         screen = self.screen() or QGuiApplication.primaryScreen()
@@ -584,9 +638,11 @@ class SchedulerConfigDialog(QDialog):
         self._update_schedule_summary()
 
         if self.schedule_list.count() > 0:
+            self.schedule_stack.setCurrentWidget(self.schedule_editor_widget)
             self.schedule_list.setCurrentRow(0)
             self.btn_copy.setEnabled(True)
         else:
+            self.schedule_stack.setCurrentWidget(self.empty_schedule_widget)
             self._current_uid = None
             self._clear_form()
             self._set_editor_enabled(False)
@@ -608,7 +664,7 @@ class SchedulerConfigDialog(QDialog):
         self.target_summary.setText("No targets yet.")
         self._clear_preview_table()
         self._clear_balance_queue_table()
-        self.balance_queue_box.setVisible(False)
+        self._set_balance_queue_visible(False)
         self.preview_summary.setText("Select a schedule to preview it.")
         self._building = False
 
@@ -634,11 +690,13 @@ class SchedulerConfigDialog(QDialog):
     def _load_current(self) -> None:
         sched = self._current_schedule()
         if sched is None:
+            self.schedule_stack.setCurrentWidget(self.empty_schedule_widget)
             self._clear_form()
             self._set_editor_enabled(False)
             return
 
         self._building = True
+        self.schedule_stack.setCurrentWidget(self.schedule_editor_widget)
         self._set_editor_enabled(True)
 
         self.id_edit.setText(str(sched.get("id", "")))
@@ -762,6 +820,7 @@ class SchedulerConfigDialog(QDialog):
         self.schedule_list.addItem(item)
         self.schedule_list.setCurrentRow(self.schedule_list.count() - 1)
         self._current_uid = str(sched["_uid"])
+        self.schedule_stack.setCurrentWidget(self.schedule_editor_widget)
         self._set_editor_enabled(True)
         self._update_schedule_summary()
 
@@ -818,6 +877,7 @@ class SchedulerConfigDialog(QDialog):
         if self.schedule_list.count() > 0:
             self.schedule_list.setCurrentRow(min(row, self.schedule_list.count() - 1))
         else:
+            self.schedule_stack.setCurrentWidget(self.empty_schedule_widget)
             self._current_uid = None
             self._clear_form()
             self._set_editor_enabled(False)
@@ -941,13 +1001,13 @@ class SchedulerConfigDialog(QDialog):
             )
             self._clear_preview_table()
             self._clear_balance_queue_table()
-            self.balance_queue_box.setVisible(False)
+            self._set_balance_queue_visible(False)
             return
         if not matches:
             self.preview_summary.setText("No decks will receive limits with the current targets.")
             self._clear_preview_table()
             self._clear_balance_queue_table()
-            self.balance_queue_box.setVisible(False)
+            self._set_balance_queue_visible(False)
             return
 
         data = preview_schedule(
@@ -972,11 +1032,11 @@ class SchedulerConfigDialog(QDialog):
                 matches,
                 self.config.get("epoch", "2026-01-01"),
             )
-            self.balance_queue_box.setVisible(True)
+            self._set_balance_queue_visible(True)
             self._populate_balance_queue_table(queue_entries)
         else:
             self._clear_balance_queue_table()
-            self.balance_queue_box.setVisible(False)
+            self._set_balance_queue_visible(False)
 
     def _load_defaults(self) -> None:
         self._building = True
@@ -1146,6 +1206,7 @@ class SchedulerConfigDialog(QDialog):
                 self.type_combo.isEnabled() and self._stagger_mode_value(self.dow_stagger_mode) != "none"
             )
         self.rebalance_btn.setEnabled(rebalance_enabled)
+        self.rebalance_row.setVisible(rebalance_enabled)
 
     def _update_type_help(self) -> None:
         sched_type = "every_n_days" if self.type_combo.currentIndex() == 0 else "dow"
@@ -1168,6 +1229,8 @@ class SchedulerConfigDialog(QDialog):
         self.notify_mode_combo.setEnabled(notify_enabled and self.notify_enabled_check.isEnabled())
         self.leaf_only_check.setEnabled(fractional_enabled and self.fractional_enabled_check.isEnabled())
         self.leaf_only_help.setEnabled(fractional_enabled)
+        self.leaf_only_help.setVisible(fractional_enabled)
+        self.notify_mode_help.setVisible(notify_enabled)
         self._update_notify_mode_help()
         self._refresh_strategy_controls()
 
@@ -1175,6 +1238,14 @@ class SchedulerConfigDialog(QDialog):
         self.preview_table.clear()
         self.preview_table.setRowCount(0)
         self.preview_table.setColumnCount(0)
+
+    def _set_balance_queue_visible(self, visible: bool) -> None:
+        if not visible and self.preview_tabs.currentIndex() == self.balance_queue_tab_index:
+            self.preview_tabs.setCurrentIndex(0)
+        if hasattr(self.preview_tabs, "setTabVisible"):
+            self.preview_tabs.setTabVisible(self.balance_queue_tab_index, visible)
+        else:
+            self.preview_tabs.setTabEnabled(self.balance_queue_tab_index, visible)
 
     def _clear_balance_queue_table(self) -> None:
         self.balance_queue_table.clear()

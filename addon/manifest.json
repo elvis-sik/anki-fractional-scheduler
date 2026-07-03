@@ -1,8 +1,11 @@
 {
+  "package": "fractional_scheduler",
   "name": "Fractional New-Card Scheduler",
-  "mod": 1775156400,
-  "version": "0.4.0",
+  "mod": 1783096494,
   "author": "Elvis Sik",
-  "min_point_version": 49,
-  "max_point_version": 0
+  "min_point_version": 55,
+  "max_point_version": 250900,
+  "human_version": "0.4.0",
+  "description": "Schedules fractional new-card limits and deck health badges using Anki's Today-only deck limits.",
+  "homepage": "https://github.com/elvis-sik/anki-fractional-scheduler"
 }

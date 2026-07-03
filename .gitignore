@@ -1,6 +1,11 @@
 __pycache__/
 *.py[cod]
 addon/meta.json
+.env
+dist/
+.anki-addon-release/
+.DS_Store
+.tmp-config-window/
 .venv/
 .ruff-env/
 .uv-cache/

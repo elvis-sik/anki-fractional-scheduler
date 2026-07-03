@@ -11,6 +11,8 @@ An Anki add-on for two related jobs:
 - Limits are applied through Anki's deck-config update path so they affect the Today-Only new-card limit UI.
 
 ## Install (manual)
+Requires Anki 2.1.55 or newer.
+
 1. Copy the `addon` folder into your Anki add-ons directory as its own folder (e.g. `FractionalScheduler`).
 2. Restart Anki.
 3. Use `Tools -> Fractional Scheduler: Open Config` to edit config.
@@ -129,3 +131,18 @@ anki-workbench smoke --xvfb
 
 The probe verifies that the add-on module loads and that
 `Fractional Scheduler: Open Config` appears in Anki's Tools menu.
+
+## Release
+
+Release packaging uses the sibling `anki-addon-release` project:
+
+```bash
+make release
+```
+
+That target validates the manifest/listing metadata, builds
+`dist/fractional-new-card-scheduler.ankiaddon`, inspects the archive contents,
+and runs an AnkiWeb dry run. Use `make release-handoff` to write handoff files
+for a browser/manual upload, or `make release-login` and `make release-publish`
+when publishing through the release browser profile with credentials from a
+git-ignored `.env` file.
