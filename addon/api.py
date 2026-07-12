@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .config import load_config
+from .config import load_config, save_config, sync_deck_target_names
 from .schedule import FractionalDeckHealth, compute_schedule_health_snapshot
 
 
@@ -12,4 +12,6 @@ class FractionalSchedulerAPI:
         if col is None:
             return {}
         config = load_config(self._addon_name)
+        if sync_deck_target_names(col, config):
+            save_config(self._addon_name, config)
         return compute_schedule_health_snapshot(col, config)

@@ -36,7 +36,7 @@ from aqt.qt import (
     QWidget,
 )
 
-from .config import DEFAULT_CONFIG, config_to_dict, load_config, normalize_config
+from .config import DEFAULT_CONFIG, config_to_dict, load_config, normalize_config, sync_deck_target_names
 from .notify import refresh_deck_browser
 from .schedule import (
     FEATURE_NOTIFY,
@@ -778,6 +778,8 @@ class SchedulerConfigDialog(QDialog):
                 schedules[idx] = updated
                 break
         self.config["schedules"] = schedules
+        if mw is not None and mw.col is not None:
+            sync_deck_target_names(mw.col, self.config)
         self._persist_config()
         item = self._item_for_uid(current_uid)
         if item:
@@ -846,6 +848,8 @@ class SchedulerConfigDialog(QDialog):
             "notify_descendant_mode": str(base.get("notify_descendant_mode", "direct_only")),
             "stagger": dict(base.get("stagger", {})) if base.get("stagger") else {"mode": "stable"},
         }
+        if isinstance(base.get("target_deck_ids"), dict):
+            copied["target_deck_ids"] = dict(base["target_deck_ids"])
         if copied["type"] == "every_n_days":
             copied["m"] = int(base.get("m", 1))
             copied["n"] = int(base.get("n", 3))

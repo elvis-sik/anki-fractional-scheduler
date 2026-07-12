@@ -48,6 +48,7 @@ AnkiWeb page: <https://ankiweb.net/shared/info/304166926>
 - Day-of-week schedules with separate values for Mon-Sun.
 - Multiple deck targets per schedule using exact names or shell-style wildcards.
 - `Pick deck...` adds exact targets immediately, and `Add wildcard...` adds wildcard targets from the deck picker.
+- Exact deck targets follow the deck when it is renamed, including when a parent-deck rename changes descendant names; wildcard targets retain their text pattern.
 - Optional stable staggering for `fraction_first` and day-of-week schedules.
 - Leaf-only matching so container decks do not receive fractional limits.
 - Per-schedule notify descendant modes: direct only, any blocked descendant, all blocked descendants, or hide container badges.

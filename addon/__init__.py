@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from .api import FractionalSchedulerAPI
 from .apply import apply_limits
-from .config import load_config, save_config
+from .config import load_config, save_config, sync_deck_target_names
 from .notify import decorate_deck_browser
 from .schedule import DEBUG_LOG_PATH, compute_deck_limits, debug_logging_enabled
 from .ui import SchedulerConfigDialog
@@ -83,8 +83,15 @@ def _should_skip_automatic_apply(col, config) -> bool:
     return _last_applied_day(col) == today
 
 
-def _apply(col, source: str) -> tuple[int, int, bool]:
+def _load_config_for_collection(col):
     config = load_config(__name__)
+    if sync_deck_target_names(col, config):
+        save_config(__name__, config)
+    return config
+
+
+def _apply(col, source: str) -> tuple[int, int, bool]:
+    config = _load_config_for_collection(col)
     dry_run = bool(config.defaults.get("dry_run", False))
 
     limits = compute_deck_limits(col, config)
@@ -102,7 +109,7 @@ def _on_profile_open() -> None:
         return
     _cleanup_legacy_debug_log()
     _register_api_service()
-    config = load_config(__name__)
+    config = _load_config_for_collection(mw.col)
     if not config.defaults.get("apply_on_profile_open", True):
         return
     if _should_skip_automatic_apply(mw.col, config):
@@ -112,7 +119,7 @@ def _on_profile_open() -> None:
 
 def _on_collection_open(col) -> None:
     _cleanup_legacy_debug_log()
-    config = load_config(__name__)
+    config = _load_config_for_collection(col)
     if not config.defaults.get("apply_on_collection_open", True):
         return
     if _should_skip_automatic_apply(col, config):
@@ -123,7 +130,7 @@ def _on_collection_open(col) -> None:
 def _apply_for_sync(source: str) -> None:
     if mw is None or mw.col is None:
         return
-    config = load_config(__name__)
+    config = _load_config_for_collection(mw.col)
     if not config.defaults.get("apply_on_sync", False):
         return
     if _should_skip_automatic_apply(mw.col, config):
@@ -149,6 +156,8 @@ def _register_sync_apply_hook(hooks) -> None:
 def _open_config() -> bool:
     if mw is None:
         return False
+    if mw.col is not None:
+        _load_config_for_collection(mw.col)
     dialog = SchedulerConfigDialog(__name__, parent=mw, apply_callback=_manual_apply)
     dialog.exec()
     return True
@@ -179,7 +188,7 @@ def _setup_menu() -> None:
 def _decorate_decks_screen(deck_browser, content) -> None:
     if mw is None or mw.col is None:
         return
-    config = load_config(__name__)
+    config = _load_config_for_collection(mw.col)
     decorate_deck_browser(deck_browser, content, config)
 
 

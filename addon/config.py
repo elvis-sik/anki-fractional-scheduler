@@ -98,6 +98,55 @@ def config_to_dict(config: AddonConfig | Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def sync_deck_target_names(col, config: AddonConfig | Dict[str, Any]) -> bool:
+    """Update exact deck targets after Anki has renamed their decks.
+
+    Schedule targets remain human-readable names, but an exact target is bound
+    to the deck ID that existed when it was first seen. Deck IDs survive both
+    direct deck renames and parent-deck renames, which also rename descendants.
+    Wildcard targets intentionally keep their text-only semantics.
+    """
+    names_by_id = _deck_names_by_id(col)
+    if not names_by_id:
+        return False
+
+    schedules = config.schedules if isinstance(config, AddonConfig) else config.get("schedules", [])
+    changed = False
+    for schedule in schedules:
+        if not isinstance(schedule, dict):
+            continue
+
+        targets = list(schedule.get("targets", []) or [])
+        bindings = _normalize_target_deck_ids(schedule.get("target_deck_ids"), targets)
+        updated_targets: List[str] = []
+        updated_bindings: Dict[str, int] = {}
+
+        for target in targets:
+            deck_id = bindings.get(target)
+            current_name = names_by_id.get(deck_id) if deck_id is not None else None
+            if current_name is None and _is_exact_target(target):
+                deck_id = _deck_id_for_name(names_by_id, target)
+                current_name = target if deck_id is not None else None
+
+            updated_target = current_name or target
+            if updated_target not in updated_targets:
+                updated_targets.append(updated_target)
+            if deck_id is not None and current_name is not None:
+                updated_bindings[updated_target] = deck_id
+
+        if targets != updated_targets:
+            schedule["targets"] = updated_targets
+            changed = True
+        if bindings != updated_bindings:
+            if updated_bindings:
+                schedule["target_deck_ids"] = updated_bindings
+            else:
+                schedule.pop("target_deck_ids", None)
+            changed = True
+
+    return changed
+
+
 def normalize_config(raw: Dict[str, Any]) -> AddonConfig:
     epoch = raw.get("epoch", DEFAULT_CONFIG["epoch"])
 
@@ -134,6 +183,10 @@ def normalize_config(raw: Dict[str, Any]) -> AddonConfig:
             "notify_enabled": bool(sched.get("notify_enabled", False)),
             "notify_descendant_mode": _normalize_notify_descendant_mode(sched.get("notify_descendant_mode")),
         }
+
+        target_deck_ids = _normalize_target_deck_ids(sched.get("target_deck_ids"), targets)
+        if target_deck_ids:
+            normalized["target_deck_ids"] = target_deck_ids
 
         if sched_type == "every_n_days":
             m = sched.get("m")
@@ -230,6 +283,60 @@ def _normalize_stagger_state(raw_state: Any) -> Optional[Dict[str, Any]]:
     return normalized
 
 
+def _is_exact_target(target: str) -> bool:
+    return "*" not in target and "?" not in target
+
+
+def _normalize_target_deck_ids(raw_bindings: Any, targets: List[str]) -> Dict[str, int]:
+    if not isinstance(raw_bindings, dict):
+        return {}
+
+    target_set = set(targets)
+    bindings: Dict[str, int] = {}
+    for raw_target, raw_deck_id in raw_bindings.items():
+        if not isinstance(raw_target, str) or raw_target not in target_set or not _is_exact_target(raw_target):
+            continue
+        try:
+            bindings[raw_target] = int(raw_deck_id)
+        except Exception:
+            continue
+    return bindings
+
+
+def _deck_names_by_id(col) -> Dict[int, str]:
+    decks = getattr(col, "decks", None)
+    all_names_and_ids = getattr(decks, "all_names_and_ids", None)
+    if not callable(all_names_and_ids):
+        return {}
+
+    names_by_id: Dict[int, str] = {}
+    try:
+        entries = all_names_and_ids()
+    except Exception:
+        return {}
+
+    for entry in entries:
+        if isinstance(entry, dict):
+            name, deck_id = entry.get("name"), entry.get("id")
+        elif isinstance(entry, (tuple, list)) and len(entry) >= 2:
+            name, deck_id = entry[0], entry[1]
+        else:
+            name, deck_id = getattr(entry, "name", None), getattr(entry, "id", None)
+        try:
+            if isinstance(name, str) and deck_id is not None:
+                names_by_id[int(deck_id)] = name
+        except Exception:
+            continue
+    return names_by_id
+
+
+def _deck_id_for_name(names_by_id: Dict[int, str], target: str) -> Optional[int]:
+    for deck_id, name in names_by_id.items():
+        if name == target:
+            return deck_id
+    return None
+
+
 def _schedule_to_dict(sched: Dict[str, Any]) -> Dict[str, Any]:
     persisted: Dict[str, Any] = {
         "id": str(sched.get("id", "")),
@@ -254,5 +361,9 @@ def _schedule_to_dict(sched: Dict[str, Any]) -> Dict[str, Any]:
     stagger_state = _normalize_stagger_state(sched.get("stagger_state"))
     if stagger_state is not None:
         persisted["stagger_state"] = stagger_state
+
+    target_deck_ids = _normalize_target_deck_ids(sched.get("target_deck_ids"), persisted["targets"])
+    if target_deck_ids:
+        persisted["target_deck_ids"] = target_deck_ids
 
     return persisted
