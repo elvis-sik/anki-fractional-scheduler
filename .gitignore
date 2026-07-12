@@ -8,6 +8,7 @@ dist/
 *.colpkg
 *.log
 .anki-addon-release/
+out/
 .DS_Store
 .tmp-config-window/
 .venv/
