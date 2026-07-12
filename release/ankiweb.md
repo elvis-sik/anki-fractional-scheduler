@@ -18,6 +18,7 @@ Features:
 - Every-N-days schedules, including fractional patterns like 1 every 3 days.
 - Day-of-week schedules with separate values for Monday through Sunday.
 - Multiple exact or wildcard deck targets per schedule.
+- Exact targets follow their deck through direct and parent-deck renames.
 - Stable staggering so related decks can be spread across different days.
 - Balance-first scheduling for grouped decks, designed to avoid catch-up spikes.
 - Optional notify badges per schedule.

@@ -5,7 +5,7 @@
   "author": "Elvis Sik",
   "min_point_version": 55,
   "max_point_version": 250900,
-  "human_version": "0.4.0",
+  "human_version": "0.4.1",
   "description": "Schedules fractional new-card limits and deck health badges using Anki's Today-only deck limits.",
   "homepage": "https://github.com/elvis-sik/anki-fractional-scheduler"
 }

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1 - 2026-07-12
+
+- Exact deck targets now stay attached when Anki renames the deck, including descendant renames caused by renaming a parent deck. Wildcard targets intentionally retain their text pattern.
+
 ## 0.4.0 - 2026-07-03
 
 - Prepared the add-on for repeatable `.ankiaddon` packaging and AnkiWeb release checks with `anki-addon-release`.
