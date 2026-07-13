@@ -47,8 +47,8 @@ AnkiWeb page: <https://ankiweb.net/shared/info/304166926>
 - Three fractional strategies: `balance_first`, `fraction_first`, and `hash`.
 - Day-of-week schedules with separate values for Mon-Sun.
 - Ordered deck rules per schedule using exact names or shell-style wildcards. Prefix a rule with `!` to exclude matching decks; a later matching rule includes them again.
-- `Pick deck...` adds exact rules immediately, while `Add wildcard...` and `Exclude wildcard...` add include/exclude wildcard rules from the deck picker.
-- Exact include and exclusion rules follow the deck when it is renamed, including when a parent-deck rename changes descendant names; wildcard rules retain their text pattern.
+- The picker supports selecting several decks at once. `Pick deck...` adds exact rules, while `Add wildcard...` and `Exclude wildcard...` add include/exclude subtree rules for every selected deck.
+- Exact rules and simple subtree rules such as `Deck::*` or `!Deck::*` follow their root deck when it is renamed, including parent-deck renames. General patterns such as `*Chemistry*` retain their text pattern.
 - Optional stable staggering for `fraction_first` and day-of-week schedules.
 - Leaf-only matching so container decks do not receive fractional limits.
 - Per-schedule notify descendant modes: direct only, any blocked descendant, all blocked descendants, or hide container badges.

@@ -98,10 +98,10 @@ class NormalizeConfigTests(unittest.TestCase):
         self.assertTrue(config.sync_deck_target_names(col, config_data))
         schedule = config_data.schedules[0]
         self.assertEqual(schedule["targets"], ["Renamed", "Renamed::Child", "Other*"])
-        self.assertEqual(schedule["target_deck_ids"], {"Renamed": 1, "Renamed::Child": 2})
+        self.assertEqual(schedule["target_deck_ids"], {"Renamed": 1, "Renamed::Child": 2, "Other*": 3})
         self.assertEqual(
             config.config_to_dict(config_data)["schedules"][0]["target_deck_ids"],
-            {"Renamed": 1, "Renamed::Child": 2},
+            {"Renamed": 1, "Renamed::Child": 2, "Other*": 3},
         )
         self.assertFalse(config.sync_deck_target_names(col, config_data))
 
@@ -152,6 +152,62 @@ class NormalizeConfigTests(unittest.TestCase):
         self.assertTrue(config.sync_deck_target_names(col, config_data))
         self.assertEqual(config_data.schedules[0]["targets"], ["!Archive Renamed"])
         self.assertEqual(config_data.schedules[0]["target_deck_ids"], {"!Archive Renamed": 42})
+
+    def test_subtree_exclusion_target_follows_parent_rename_by_id(self) -> None:
+        class Decks:
+            def all_names_and_ids(self):
+                return [("Decks::Geography::GeoTrainer", 42)]
+
+        col = type("Col", (), {"decks": Decks()})()
+        config_data = config.normalize_config(
+            {
+                "schedules": [
+                    {
+                        "id": "exclude-subtree",
+                        "type": "every_n_days",
+                        "m": 1,
+                        "n": 3,
+                        "targets": ["!GeoTrainer*"],
+                        "target_deck_ids": {"!GeoTrainer*": 42},
+                    }
+                ]
+            }
+        )
+
+        self.assertTrue(config.sync_deck_target_names(col, config_data))
+        self.assertEqual(config_data.schedules[0]["targets"], ["!Decks::Geography::GeoTrainer*"])
+        self.assertEqual(
+            config_data.schedules[0]["target_deck_ids"], {"!Decks::Geography::GeoTrainer*": 42}
+        )
+
+    def test_legacy_subtree_rule_recovers_a_unique_moved_deck(self) -> None:
+        class Decks:
+            def all_names_and_ids(self):
+                return [
+                    ("Decks::Geography::GeoTrainer", 42),
+                    ("Decks::Geography::GeoTrainer::World", 43),
+                ]
+
+        col = type("Col", (), {"decks": Decks()})()
+        config_data = config.normalize_config(
+            {
+                "schedules": [
+                    {
+                        "id": "migrate-subtree",
+                        "type": "every_n_days",
+                        "m": 1,
+                        "n": 3,
+                        "targets": ["!GeoTrainer*"],
+                    }
+                ]
+            }
+        )
+
+        self.assertTrue(config.sync_deck_target_names(col, config_data))
+        self.assertEqual(config_data.schedules[0]["targets"], ["!Decks::Geography::GeoTrainer*"])
+        self.assertEqual(
+            config_data.schedules[0]["target_deck_ids"], {"!Decks::Geography::GeoTrainer*": 42}
+        )
 
 
 if __name__ == "__main__":

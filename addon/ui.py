@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, cast
 
 from aqt import mw
 from aqt.qt import (
+    QAbstractItemView,
     QBrush,
     QCheckBox,
     QColor,
@@ -925,28 +926,28 @@ class SchedulerConfigDialog(QDialog):
         dialog = DeckPickerDialog(parent=self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        selection = dialog.selected_deck()
-        if not selection:
+        selections = dialog.selected_decks()
+        if not selections:
             return
-        self._append_target(selection)
+        self._append_targets(selections)
 
     def _pick_wildcard_target(self) -> None:
         dialog = DeckPickerDialog(parent=self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        selection = dialog.selected_deck()
-        if not selection:
+        selections = dialog.selected_decks()
+        if not selections:
             return
-        self._append_target(f"{selection}*")
+        self._append_targets(f"{selection}*" for selection in selections)
 
     def _pick_exclude_wildcard_target(self) -> None:
         dialog = DeckPickerDialog(parent=self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        selection = dialog.selected_deck()
-        if not selection:
+        selections = dialog.selected_decks()
+        if not selections:
             return
-        self._append_target(f"!{selection}*")
+        self._append_targets(f"!{selection}*" for selection in selections)
 
     def _remove_target(self) -> None:
         row = self.target_list.currentRow()
@@ -956,17 +957,29 @@ class SchedulerConfigDialog(QDialog):
         self._refresh_preview()
 
     def _append_target(self, text: str) -> None:
-        normalized = text.strip()
-        if not normalized:
-            return
-        for row in range(self.target_list.count()):
-            item = self.target_list.item(row)
-            if item is not None and item.text() == normalized:
-                self.target_list.setCurrentRow(row)
-                self._refresh_preview()
-                return
-        self.target_list.addItem(QListWidgetItem(normalized))
-        self.target_list.setCurrentRow(self.target_list.count() - 1)
+        self._append_targets([text])
+
+    def _append_targets(self, texts) -> None:
+        last_row: Optional[int] = None
+        for text in texts:
+            normalized = str(text).strip()
+            if not normalized:
+                continue
+            existing_row = next(
+                (
+                    row
+                    for row in range(self.target_list.count())
+                    if (item := self.target_list.item(row)) is not None and item.text() == normalized
+                ),
+                None,
+            )
+            if existing_row is not None:
+                last_row = existing_row
+                continue
+            self.target_list.addItem(QListWidgetItem(normalized))
+            last_row = self.target_list.count() - 1
+        if last_row is not None:
+            self.target_list.setCurrentRow(last_row)
         self._refresh_preview()
 
     def _rebalance_current_schedule(self) -> None:
@@ -1683,7 +1696,10 @@ class DeckPickerDialog(QDialog):
         self.filter_edit.textChanged.connect(self._refresh_list)
 
         self.list_widget = QListWidget()
+        self.list_widget.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.list_widget.itemDoubleClicked.connect(self._accept)
+        selection_help = QLabel("Select several decks with ⌘/Ctrl-click or Shift-click.")
+        selection_help.setStyleSheet("color: palette(mid);")
 
         btn_row = QHBoxLayout()
         self.ok_btn = QPushButton("Use Selected")
@@ -1694,6 +1710,7 @@ class DeckPickerDialog(QDialog):
         btn_row.addWidget(self.cancel_btn)
 
         layout.addWidget(self.filter_edit)
+        layout.addWidget(selection_help)
         layout.addWidget(self.list_widget, 1)
         layout.addLayout(btn_row)
 
@@ -1708,12 +1725,9 @@ class DeckPickerDialog(QDialog):
             self.list_widget.addItem(QListWidgetItem(name))
 
     def _accept(self) -> None:
-        if self.list_widget.currentItem() is None:
+        if not self.list_widget.selectedItems():
             return
         self.accept()
 
-    def selected_deck(self) -> Optional[str]:
-        item = self.list_widget.currentItem()
-        if not item:
-            return None
-        return item.text()
+    def selected_decks(self) -> List[str]:
+        return [item.text() for item in self.list_widget.selectedItems()]

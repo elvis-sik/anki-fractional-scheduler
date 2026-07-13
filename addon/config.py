@@ -104,9 +104,10 @@ def sync_deck_target_names(col, config: AddonConfig | Dict[str, Any]) -> bool:
     Schedule targets remain human-readable names, but an exact target is bound
     to the deck ID that existed when it was first seen. Deck IDs survive both
     direct deck renames and parent-deck renames, which also rename descendants.
-    Wildcard targets intentionally keep their text-only semantics. Exact
-    exclusion rules (for example ``!Archive``) are tracked too; the ``!`` is
-    retained while their underlying deck name changes.
+    Exact targets and simple subtree rules (for example ``!Archive*``) are
+    tracked too; their ``!`` and trailing ``*`` are retained while the
+    underlying deck name changes. General wildcards such as ``*Archive*``
+    intentionally keep their text-only semantics.
     """
     names_by_id = _deck_names_by_id(col)
     if not names_by_id:
@@ -126,10 +127,15 @@ def sync_deck_target_names(col, config: AddonConfig | Dict[str, Any]) -> bool:
         for target in targets:
             deck_id = bindings.get(target)
             current_name = names_by_id.get(deck_id) if deck_id is not None else None
-            if current_name is None and _is_exact_target(target):
-                target_name = _target_name(target)
+            if current_name is None and _is_rename_tracking_target(target):
+                target_name = _target_name_for_binding(target)
                 deck_id = _deck_id_for_name(names_by_id, target_name)
-                current_name = target_name if deck_id is not None else None
+                if deck_id is None and _is_subtree_target(target):
+                    # Migrate old ``Deck*`` rules after their root deck has
+                    # been moved under a parent. Only a unique suffix match is
+                    # safe to adopt automatically.
+                    deck_id = _deck_id_for_unique_suffix(names_by_id, target_name)
+                current_name = names_by_id.get(deck_id) if deck_id is not None else None
 
             updated_target = _format_target(target, current_name) if current_name else target
             if updated_target not in updated_targets:
@@ -291,12 +297,33 @@ def _is_exact_target(target: str) -> bool:
     return bool(target_name) and "*" not in target_name and "?" not in target_name
 
 
+def _is_subtree_target(target: str) -> bool:
+    target_name = _target_name(target)
+    return (
+        len(target_name) > 1
+        and target_name.endswith("*")
+        and "*" not in target_name[:-1]
+        and "?" not in target_name
+    )
+
+
+def _is_rename_tracking_target(target: str) -> bool:
+    return _is_exact_target(target) or _is_subtree_target(target)
+
+
 def _target_name(target: str) -> str:
     return target[1:] if target.startswith("!") else target
 
 
+def _target_name_for_binding(target: str) -> str:
+    target_name = _target_name(target)
+    return target_name[:-1] if _is_subtree_target(target) else target_name
+
+
 def _format_target(original_target: str, name: str) -> str:
-    return f"!{name}" if original_target.startswith("!") else name
+    prefix = "!" if original_target.startswith("!") else ""
+    suffix = "*" if _is_subtree_target(original_target) else ""
+    return f"{prefix}{name}{suffix}"
 
 
 def _normalize_target_deck_ids(raw_bindings: Any, targets: List[str]) -> Dict[str, int]:
@@ -306,7 +333,11 @@ def _normalize_target_deck_ids(raw_bindings: Any, targets: List[str]) -> Dict[st
     target_set = set(targets)
     bindings: Dict[str, int] = {}
     for raw_target, raw_deck_id in raw_bindings.items():
-        if not isinstance(raw_target, str) or raw_target not in target_set or not _is_exact_target(raw_target):
+        if (
+            not isinstance(raw_target, str)
+            or raw_target not in target_set
+            or not _is_rename_tracking_target(raw_target)
+        ):
             continue
         try:
             bindings[raw_target] = int(raw_deck_id)
@@ -347,6 +378,12 @@ def _deck_id_for_name(names_by_id: Dict[int, str], target: str) -> Optional[int]
         if name == target:
             return deck_id
     return None
+
+
+def _deck_id_for_unique_suffix(names_by_id: Dict[int, str], target: str) -> Optional[int]:
+    suffix = f"::{target}"
+    candidates = [deck_id for deck_id, name in names_by_id.items() if name.endswith(suffix)]
+    return candidates[0] if len(candidates) == 1 else None
 
 
 def _schedule_to_dict(sched: Dict[str, Any]) -> Dict[str, Any]:
