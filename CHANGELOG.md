@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 - 2026-07-13
 
 - Added ordered include/exclude deck rules. Prefix a target with `!` to exclude it; a later matching target can add it back.
 - Deck-picker multi-selection now adds all chosen rules at once. Picker-created subtree rules and legacy unambiguous subtree rules now follow a renamed root deck.

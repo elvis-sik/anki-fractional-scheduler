@@ -1,6 +1,6 @@
 [project]
 name = "anki-fractional-scheduler"
-version = "0.4.1"
+version = "0.5.0"
 description = "Anki add-on for fractional new-card scheduling and deck health badges."
 requires-python = ">=3.10"
 dependencies = []
