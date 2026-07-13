@@ -46,9 +46,9 @@ AnkiWeb page: <https://ankiweb.net/shared/info/304166926>
 - Every-N-days schedules such as 1 card every 3 days.
 - Three fractional strategies: `balance_first`, `fraction_first`, and `hash`.
 - Day-of-week schedules with separate values for Mon-Sun.
-- Multiple deck targets per schedule using exact names or shell-style wildcards.
-- `Pick deck...` adds exact targets immediately, and `Add wildcard...` adds wildcard targets from the deck picker.
-- Exact deck targets follow the deck when it is renamed, including when a parent-deck rename changes descendant names; wildcard targets retain their text pattern.
+- Ordered deck rules per schedule using exact names or shell-style wildcards. Prefix a rule with `!` to exclude matching decks; a later matching rule includes them again.
+- `Pick deck...` adds exact rules immediately, while `Add wildcard...` and `Exclude wildcard...` add include/exclude wildcard rules from the deck picker.
+- Exact include and exclusion rules follow the deck when it is renamed, including when a parent-deck rename changes descendant names; wildcard rules retain their text pattern.
 - Optional stable staggering for `fraction_first` and day-of-week schedules.
 - Leaf-only matching so container decks do not receive fractional limits.
 - Per-schedule notify descendant modes: direct only, any blocked descendant, all blocked descendants, or hide container badges.
@@ -64,6 +64,7 @@ between the fractional strategies.
 ## Usage Notes
 
 - The config dialog autosaves; there is no separate Save button.
+- Deck rules run from top to bottom, and the last matching rule wins. For example, use `Geography*`, `!GeoTrainer*`, `GeoTrainer::A*`, and `GeoTrainer::B::C` to include Geography, exclude GeoTrainer, then add those two GeoTrainer branches back.
 - `Apply Now` writes Today-only limits immediately for the matched decks.
 - `Before sync` applies limits before collection sync when the installed Anki
   version exposes the pre-sync hook.

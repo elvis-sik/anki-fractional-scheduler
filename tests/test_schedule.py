@@ -761,6 +761,49 @@ class FeatureAssignmentTests(unittest.TestCase):
 
         self.assertEqual(matches, ["Organic Chemistry"])
 
+    def test_ordered_target_rules_can_exclude_and_reinclude_decks(self) -> None:
+        targets = ["Geography*", "!GeoTrainer*", "GeoTrainer::A*", "GeoTrainer::B::C"]
+        deck_names = [
+            "Geography::Countries",
+            "GeoTrainer::A::Flags",
+            "GeoTrainer::B::C",
+            "GeoTrainer::B::D",
+            "Other",
+        ]
+
+        self.assertEqual(
+            schedule.match_deck_names(targets, deck_names),
+            ["Geography::Countries", "GeoTrainer::A::Flags", "GeoTrainer::B::C"],
+        )
+
+    def test_exclusions_apply_to_schedule_and_notify_assignments(self) -> None:
+        schedules = [
+            {
+                "id": "ordered-rules",
+                "type": "every_n_days",
+                "m": 1,
+                "n": 3,
+                "targets": ["*", "!GeoTrainer*", "GeoTrainer::A*", "GeoTrainer::B::C"],
+                "fractional_enabled": True,
+                "notify_enabled": True,
+                "notify_descendant_mode": "direct_only",
+            }
+        ]
+        decks = [
+            deck(1, "Geography::Countries"),
+            deck(2, "GeoTrainer::A::Flags"),
+            deck(3, "GeoTrainer::B::C"),
+            deck(4, "GeoTrainer::B::D"),
+        ]
+
+        fractional, _ = schedule.schedule_assignments_for_feature(
+            decks, schedules, schedule.FEATURE_FRACTIONAL
+        )
+        notify, _ = schedule.schedule_assignments_for_feature(decks, schedules, schedule.FEATURE_NOTIFY)
+
+        self.assertEqual(sorted(fractional), [1, 2, 3])
+        self.assertEqual(sorted(notify), [1, 2, 3])
+
 
 if __name__ == "__main__":
     unittest.main()

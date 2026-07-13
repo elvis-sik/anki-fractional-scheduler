@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Added ordered include/exclude deck rules. Prefix a target with `!` to exclude it; a later matching target can add it back.
+
 ## 0.4.1 - 2026-07-12
 
 - Exact deck targets now stay attached when Anki renames the deck, including descendant renames caused by renaming a parent deck. Wildcard targets intentionally retain their text pattern.

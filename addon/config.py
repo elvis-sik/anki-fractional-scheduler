@@ -104,7 +104,9 @@ def sync_deck_target_names(col, config: AddonConfig | Dict[str, Any]) -> bool:
     Schedule targets remain human-readable names, but an exact target is bound
     to the deck ID that existed when it was first seen. Deck IDs survive both
     direct deck renames and parent-deck renames, which also rename descendants.
-    Wildcard targets intentionally keep their text-only semantics.
+    Wildcard targets intentionally keep their text-only semantics. Exact
+    exclusion rules (for example ``!Archive``) are tracked too; the ``!`` is
+    retained while their underlying deck name changes.
     """
     names_by_id = _deck_names_by_id(col)
     if not names_by_id:
@@ -125,10 +127,11 @@ def sync_deck_target_names(col, config: AddonConfig | Dict[str, Any]) -> bool:
             deck_id = bindings.get(target)
             current_name = names_by_id.get(deck_id) if deck_id is not None else None
             if current_name is None and _is_exact_target(target):
-                deck_id = _deck_id_for_name(names_by_id, target)
-                current_name = target if deck_id is not None else None
+                target_name = _target_name(target)
+                deck_id = _deck_id_for_name(names_by_id, target_name)
+                current_name = target_name if deck_id is not None else None
 
-            updated_target = current_name or target
+            updated_target = _format_target(target, current_name) if current_name else target
             if updated_target not in updated_targets:
                 updated_targets.append(updated_target)
             if deck_id is not None and current_name is not None:
@@ -284,7 +287,16 @@ def _normalize_stagger_state(raw_state: Any) -> Optional[Dict[str, Any]]:
 
 
 def _is_exact_target(target: str) -> bool:
-    return "*" not in target and "?" not in target
+    target_name = _target_name(target)
+    return bool(target_name) and "*" not in target_name and "?" not in target_name
+
+
+def _target_name(target: str) -> str:
+    return target[1:] if target.startswith("!") else target
+
+
+def _format_target(original_target: str, name: str) -> str:
+    return f"!{name}" if original_target.startswith("!") else name
 
 
 def _normalize_target_deck_ids(raw_bindings: Any, targets: List[str]) -> Dict[str, int]:

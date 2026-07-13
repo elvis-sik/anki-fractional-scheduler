@@ -317,30 +317,39 @@ class SchedulerConfigDialog(QDialog):
         rule_tab_layout.addStretch(1)
 
         # Targets
-        target_box = QGroupBox("Deck targets")
+        target_box = QGroupBox("Deck target rules")
         target_layout = QVBoxLayout(target_box)
         self.target_list = QListWidget()
         self.target_list.setMinimumHeight(48)
         self.target_list.setMaximumHeight(64)
+        target_help = QLabel(
+            "Rules run top to bottom. Prefix a rule with ! to exclude; a later match can include it again."
+        )
+        target_help.setWordWrap(True)
+        target_help.setStyleSheet("color: palette(mid);")
         self.target_summary = QLabel("No targets yet.")
         self.target_summary.setWordWrap(True)
         self.target_summary.setStyleSheet("color: palette(mid);")
+        target_layout.addWidget(target_help)
         target_layout.addWidget(self.target_summary)
 
         target_add_row = QHBoxLayout()
         self.target_input = QLineEdit()
-        self.target_input.setPlaceholderText("Deck::Subdeck or Deck::*")
+        self.target_input.setPlaceholderText("Deck::Subdeck, Deck::* or !Deck::*")
         self.target_pick = QPushButton("Pick deck...")
         self.target_pick_wildcard = QPushButton("Add wildcard...")
+        self.target_pick_exclude_wildcard = QPushButton("Exclude wildcard...")
         self.target_add = QPushButton("Add target")
         self.target_remove = QPushButton("Remove selected")
         self.target_pick.clicked.connect(self._pick_target)
         self.target_pick_wildcard.clicked.connect(self._pick_wildcard_target)
+        self.target_pick_exclude_wildcard.clicked.connect(self._pick_exclude_wildcard_target)
         self.target_add.clicked.connect(self._add_target)
         self.target_remove.clicked.connect(self._remove_target)
         target_add_row.addWidget(self.target_input, 1)
         target_add_row.addWidget(self.target_pick)
         target_add_row.addWidget(self.target_pick_wildcard)
+        target_add_row.addWidget(self.target_pick_exclude_wildcard)
         target_add_row.addWidget(self.target_add)
         target_layout.addLayout(target_add_row)
         target_list_row = QHBoxLayout()
@@ -930,6 +939,15 @@ class SchedulerConfigDialog(QDialog):
             return
         self._append_target(f"{selection}*")
 
+    def _pick_exclude_wildcard_target(self) -> None:
+        dialog = DeckPickerDialog(parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        selection = dialog.selected_deck()
+        if not selection:
+            return
+        self._append_target(f"!{selection}*")
+
     def _remove_target(self) -> None:
         row = self.target_list.currentRow()
         if row < 0:
@@ -1122,6 +1140,7 @@ class SchedulerConfigDialog(QDialog):
             self.target_input,
             self.target_pick,
             self.target_pick_wildcard,
+            self.target_pick_exclude_wildcard,
             self.target_add,
             self.target_remove,
             self.target_list,
@@ -1133,6 +1152,7 @@ class SchedulerConfigDialog(QDialog):
         self.btn_remove.setAutoDefault(False)
         self.target_pick.setAutoDefault(False)
         self.target_pick_wildcard.setAutoDefault(False)
+        self.target_pick_exclude_wildcard.setAutoDefault(False)
         self.target_add.setAutoDefault(False)
         self.target_remove.setAutoDefault(False)
         self.btn_copy.setEnabled(enabled and self.schedule_list.currentRow() >= 0)

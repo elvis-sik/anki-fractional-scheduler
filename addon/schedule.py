@@ -187,10 +187,12 @@ def _stable_deck_order(schedule: Dict[str, Any], decks: List[DeckInfo]) -> List[
 def match_deck_names(targets: Iterable[str], deck_names: Iterable[str]) -> List[str]:
     matches: List[str] = []
     for name in deck_names:
+        included = False
         for target in targets:
             if _target_matches(target, name) is not None:
-                matches.append(name)
-                break
+                included = not _is_exclusion_target(target)
+        if included:
+            matches.append(name)
     return matches
 
 
@@ -202,10 +204,8 @@ def match_deck_names_for_feature(
 ) -> List[str]:
     matches: List[str] = []
     for name in deck_names:
-        for target in schedule.get("targets", []):
-            if _target_match_for_feature(target, name, schedule, feature_key) is not None:
-                matches.append(name)
-                break
+        if _matching_target_for_feature(schedule, name, feature_key) is not None:
+            matches.append(name)
     return matches
 
 
@@ -275,18 +275,27 @@ def rebalance_schedule_offsets(col, schedule: Dict[str, Any]) -> Dict[int, int]:
 
 
 def _target_matches(target: str, deck_name: str) -> Optional[Tuple[int, int]]:
-    if deck_name == target:
-        return (3, len(target))
-    if target.endswith("*") and "*" not in target[:-1] and "?" not in target:
-        prefix = target[:-1]
+    pattern = _target_pattern(target)
+    if deck_name == pattern:
+        return (3, len(pattern))
+    if pattern.endswith("*") and "*" not in pattern[:-1] and "?" not in pattern:
+        prefix = pattern[:-1]
         if deck_name.startswith(prefix):
             return (2, len(prefix))
         return None
-    if "*" in target or "?" in target:
-        if fnmatch.fnmatchcase(deck_name.lower(), target.lower()):
-            literal_chars = len(target.replace("*", "").replace("?", ""))
+    if "*" in pattern or "?" in pattern:
+        if fnmatch.fnmatchcase(deck_name.lower(), pattern.lower()):
+            literal_chars = len(pattern.replace("*", "").replace("?", ""))
             return (1, literal_chars)
     return None
+
+
+def _is_exclusion_target(target: str) -> bool:
+    return target.startswith("!")
+
+
+def _target_pattern(target: str) -> str:
+    return target[1:] if _is_exclusion_target(target) else target
 
 
 def _best_schedule_for_deck(
@@ -301,16 +310,7 @@ def _best_schedule_for_deck(
     for idx, sched in enumerate(schedules):
         if not _schedule_feature_enabled(sched, feature_key):
             continue
-        targets = sched.get("targets") or []
-        best_target_score: Optional[Tuple[int, int]] = None
-
-        for target in targets:
-            match = _target_match_for_feature(target, deck_name, sched, feature_key)
-            if match is None:
-                continue
-            if best_target_score is None or match > best_target_score:
-                best_target_score = match
-
+        best_target_score = _matching_target_for_feature(sched, deck_name, feature_key)
         if best_target_score is None:
             continue
 
@@ -339,11 +339,35 @@ def _target_match_for_feature(
 
     if schedule.get("notify_descendant_mode") == "direct_only":
         return None
-    if "*" in target or "?" in target:
+    pattern = _target_pattern(target)
+    if "*" in pattern or "?" in pattern:
         return None
-    if deck_name.startswith(f"{target}::"):
-        return (2, len(target))
+    if deck_name.startswith(f"{pattern}::"):
+        return (2, len(pattern))
     return None
+
+
+def _matching_target_for_feature(
+    schedule: Dict[str, Any],
+    deck_name: str,
+    feature_key: str,
+) -> Optional[Tuple[int, int]]:
+    """Return the final matching inclusion rule for a deck.
+
+    Target rules are evaluated in list order. A rule prefixed with ``!``
+    excludes its matches, and any later matching rule can include the deck
+    again. This makes broad include/exclude/re-include lists predictable in
+    both scheduling and notification contexts.
+    """
+    decision: Optional[Tuple[bool, Tuple[int, int]]] = None
+    for target in schedule.get("targets", []):
+        match = _target_match_for_feature(target, deck_name, schedule, feature_key)
+        if match is not None:
+            decision = (not _is_exclusion_target(target), match)
+
+    if decision is None or not decision[0]:
+        return None
+    return decision[1]
 
 
 def _schedule_feature_enabled(schedule: Dict[str, Any], feature_key: str) -> bool:

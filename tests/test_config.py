@@ -128,6 +128,31 @@ class NormalizeConfigTests(unittest.TestCase):
         self.assertTrue(config.sync_deck_target_names(col, config_data))
         self.assertEqual(config_data.schedules[0]["target_deck_ids"], {"Geography": 42})
 
+    def test_exact_exclusion_target_follows_deck_rename_by_id(self) -> None:
+        class Decks:
+            def all_names_and_ids(self):
+                return [("Archive Renamed", 42)]
+
+        col = type("Col", (), {"decks": Decks()})()
+        config_data = config.normalize_config(
+            {
+                "schedules": [
+                    {
+                        "id": "exclude",
+                        "type": "every_n_days",
+                        "m": 1,
+                        "n": 3,
+                        "targets": ["!Archive"],
+                        "target_deck_ids": {"!Archive": 42},
+                    }
+                ]
+            }
+        )
+
+        self.assertTrue(config.sync_deck_target_names(col, config_data))
+        self.assertEqual(config_data.schedules[0]["targets"], ["!Archive Renamed"])
+        self.assertEqual(config_data.schedules[0]["target_deck_ids"], {"!Archive Renamed": 42})
+
 
 if __name__ == "__main__":
     unittest.main()
