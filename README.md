@@ -1,7 +1,7 @@
 # Fractional New-Card Scheduler
 
 [![AnkiWeb add-on 304166926](https://img.shields.io/badge/AnkiWeb-304166926-2f80ed)](https://ankiweb.net/shared/info/304166926)
-[![Source on GitHub](https://img.shields.io/badge/source-GitHub-24292f)](https://github.com/elvis-sik/anki-fractional-scheduler)
+[![Source on GitHub](https://img.shields.io/badge/source-GitHub-24292f)](https://github.com/ritornello-labs/anki-fractional-scheduler)
 ![Anki 2.1.55+](https://img.shields.io/badge/Anki-%3E%3D2.1.55-4caf50)
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 

@@ -1,6 +1,6 @@
 ---
 title: Fractional New-Card Scheduler
-support_url: https://github.com/elvis-sik/anki-fractional-scheduler
+support_url: https://github.com/ritornello-labs/anki-fractional-scheduler
 ---
 
 Fractional New-Card Scheduler lets you pace new cards below whole-number daily limits, such as introducing 1 new card every 3 days, while still using Anki's Today-only new-card limits.
@@ -26,4 +26,4 @@ Features:
 
 Requires Anki 2.1.55 or newer.
 
-GitHub: [https://github.com/elvis-sik/anki-fractional-scheduler](https://github.com/elvis-sik/anki-fractional-scheduler)
+GitHub: [https://github.com/ritornello-labs/anki-fractional-scheduler](https://github.com/ritornello-labs/anki-fractional-scheduler)
