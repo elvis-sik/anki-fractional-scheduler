@@ -9,9 +9,9 @@ Use it when some decks deserve a slow trickle of new material instead of a fixed
 
 It also includes deck health badges: schedule rules can mark decks when a deck or its monitored descendants are blocked by 0/day limits or have no unsuspended new cards available.
 
-Screenshot: [Fractional Scheduler config dialog](https://raw.githubusercontent.com/elvis-sik/anki-fractional-scheduler/main/docs/images/config-window.png)
+Screenshot: [Fractional Scheduler config dialog](https://raw.githubusercontent.com/ritornello-labs/anki-fractional-scheduler/main/docs/images/config-window.png)
 
-<img alt="Fractional Scheduler config dialog" src="https://raw.githubusercontent.com/elvis-sik/anki-fractional-scheduler/main/docs/images/config-window.png" width="760">
+<img alt="Fractional Scheduler config dialog" src="https://raw.githubusercontent.com/ritornello-labs/anki-fractional-scheduler/main/docs/images/config-window.png" width="760">
 
 Features:
 
